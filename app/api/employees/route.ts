@@ -21,6 +21,9 @@ export async function GET() {
                 weeklyHours: true,
                 hourlyRate: true,
                 overtimeBalance: true,
+                vacationDays: true,
+                vacationDaysUsed: true,
+                defaultSchedule: true,
                 color: true,
                 startDate: true,
             },
@@ -43,7 +46,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json()
-        const { employeeId, firstName, lastName, email, role, weeklyHours, hourlyRate, color, startDate } = body
+        const { employeeId, firstName, lastName, email, role, weeklyHours, hourlyRate, vacationDays, defaultSchedule, color, startDate } = body
 
         // Check if employeeId already exists
         const existingEmployee = await prisma.user.findUnique({
@@ -75,6 +78,9 @@ export async function POST(request: Request) {
                 weeklyHours: weeklyHours || 40,
                 hourlyRate: hourlyRate || 15,
                 overtimeBalance: 0,
+                vacationDays: vacationDays || 30,
+                vacationDaysUsed: 0,
+                defaultSchedule: defaultSchedule || null,
                 color: color || `#${Math.floor(Math.random() * 16777215).toString(16)}`,
                 startDate: startDate ? new Date(startDate) : new Date(),
             }
@@ -96,7 +102,7 @@ export async function PATCH(request: Request) {
         }
 
         const body = await request.json()
-        const { id, employeeId, firstName, lastName, email, role, weeklyHours, hourlyRate, color, startDate } = body
+        const { id, employeeId, firstName, lastName, email, role, weeklyHours, hourlyRate, vacationDays, vacationDaysUsed, defaultSchedule, color, startDate } = body
 
         if (!id) {
             return NextResponse.json({ error: 'ID required' }, { status: 400 })
@@ -138,6 +144,9 @@ export async function PATCH(request: Request) {
                 ...(role && { role }),
                 ...(weeklyHours !== undefined && { weeklyHours }),
                 ...(hourlyRate !== undefined && { hourlyRate }),
+                ...(vacationDays !== undefined && { vacationDays }),
+                ...(vacationDaysUsed !== undefined && { vacationDaysUsed }),
+                ...(defaultSchedule !== undefined && { defaultSchedule }),
                 ...(color && { color }),
                 ...(startDate && { startDate: new Date(startDate) }),
             }

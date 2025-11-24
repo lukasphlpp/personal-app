@@ -68,8 +68,9 @@ export async function POST(request: Request) {
             }
         })
 
-        // Update overtime balance
+        // Update overtime balance and vacation days
         await updateOvertimeBalance(userId)
+        await updateVacationDays(userId)
 
         return NextResponse.json(entry, { status: 201 })
     } catch (error) {
@@ -105,8 +106,9 @@ export async function PATCH(request: Request) {
             }
         })
 
-        // Update overtime balance
+        // Update overtime balance and vacation days
         await updateOvertimeBalance(entry.userId)
+        await updateVacationDays(entry.userId)
 
         return NextResponse.json(entry)
     } catch (error) {
@@ -134,8 +136,9 @@ export async function DELETE(request: Request) {
             where: { id }
         })
 
-        // Update overtime balance
+        // Update overtime balance and vacation days
         await updateOvertimeBalance(entry.userId)
+        await updateVacationDays(entry.userId)
 
         return NextResponse.json({ success: true })
     } catch (error) {
@@ -199,5 +202,37 @@ async function updateOvertimeBalance(userId: string) {
     await prisma.user.update({
         where: { id: userId },
         data: { overtimeBalance }
+    })
+}
+
+// Helper: Calculate and update vacation days used
+async function updateVacationDays(userId: string) {
+    const currentYear = new Date().getFullYear()
+    const startDate = new Date(currentYear, 0, 1)
+    const endDate = new Date(currentYear + 1, 0, 0)
+
+    const vacationEntries = await prisma.timeEntry.findMany({
+        where: {
+            userId,
+            type: 'vacation',
+            date: {
+                gte: startDate,
+                lte: endDate
+            }
+        }
+    })
+
+    let usedDays = 0
+    for (const entry of vacationEntries) {
+        if (entry.halfDay) {
+            usedDays += 0.5
+        } else {
+            usedDays += 1.0
+        }
+    }
+
+    await prisma.user.update({
+        where: { id: userId },
+        data: { vacationDaysUsed: usedDays }
     })
 }
