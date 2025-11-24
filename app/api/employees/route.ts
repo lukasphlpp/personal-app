@@ -19,6 +19,7 @@ export async function GET() {
                 email: true,
                 role: true,
                 weeklyHours: true,
+                hourlyRate: true,
                 overtimeBalance: true,
                 color: true,
                 startDate: true,
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json()
-        const { employeeId, firstName, lastName, email, role, weeklyHours, color, startDate } = body
+        const { employeeId, firstName, lastName, email, role, weeklyHours, hourlyRate, color, startDate } = body
 
         // Check if employeeId already exists
         const existingEmployee = await prisma.user.findUnique({
@@ -69,18 +70,17 @@ export async function POST(request: Request) {
                 firstName,
                 lastName,
                 email: email || null,
-                password: null, // No password for employees without login
+                password: null,
                 role: role || 'EMPLOYEE',
                 weeklyHours: weeklyHours || 40,
+                hourlyRate: hourlyRate || 15,
                 overtimeBalance: 0,
                 color: color || `#${Math.floor(Math.random() * 16777215).toString(16)}`,
                 startDate: startDate ? new Date(startDate) : new Date(),
             }
         })
 
-        // Remove password from response
         const { password: _, ...userWithoutPassword } = user
-
         return NextResponse.json(userWithoutPassword, { status: 201 })
     } catch (error) {
         console.error('Error creating employee:', error)
@@ -96,7 +96,7 @@ export async function PATCH(request: Request) {
         }
 
         const body = await request.json()
-        const { id, employeeId, firstName, lastName, email, role, weeklyHours, color, startDate } = body
+        const { id, employeeId, firstName, lastName, email, role, weeklyHours, hourlyRate, color, startDate } = body
 
         if (!id) {
             return NextResponse.json({ error: 'ID required' }, { status: 400 })
@@ -137,6 +137,7 @@ export async function PATCH(request: Request) {
                 ...(email !== undefined && { email: email || null }),
                 ...(role && { role }),
                 ...(weeklyHours !== undefined && { weeklyHours }),
+                ...(hourlyRate !== undefined && { hourlyRate }),
                 ...(color && { color }),
                 ...(startDate && { startDate: new Date(startDate) }),
             }

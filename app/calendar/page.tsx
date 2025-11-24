@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2 } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Trash2, AlertTriangle } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
-import Modal from '@/components/Modal'
 
 interface Employee {
     id: string
@@ -11,8 +10,12 @@ interface Employee {
     firstName: string
     lastName: string
     weeklyHours: number
-    overtimeBalance: number
     color: string
+}
+
+interface TimeSlot {
+    startTime: string
+    endTime: string
 }
 
 interface TimeEntry {
@@ -20,6 +23,9 @@ interface TimeEntry {
     userId: string
     date: string
     type: 'work' | 'vacation' | 'sick' | 'holiday'
+    startTime: string | null
+    endTime: string | null
+    breakMinutes: number | null
     hours: number | null
     note: string | null
 }
@@ -30,16 +36,12 @@ export default function CalendarPage() {
     const [currentDate, setCurrentDate] = useState(new Date())
     const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([])
     const [loading, setLoading] = useState(false)
-    const [isModalOpen, setIsModalOpen] = useState(false)
-    const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-    const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null)
+    const [expandedDay, setExpandedDay] = useState<string | null>(null)
 
-    // Form state
-    const [formData, setFormData] = useState({
-        type: 'work' as 'work' | 'vacation' | 'sick' | 'holiday',
-        hours: 8,
-        note: ''
-    })
+    // Form state for expanded day
+    const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([{ startTime: '08:00', endTime: '12:00' }])
+    const [entryType, setEntryType] = useState<'work' | 'vacation' | 'sick' | 'holiday'>('work')
+    const [note, setNote] = useState('')
 
     useEffect(() => {
         fetchEmployees()
@@ -86,20 +88,123 @@ export default function CalendarPage() {
         }
     }
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-        if (!selectedEmployee || !selectedDate) return
+    const toggleDay = (dateStr: string) => {
+        if (expandedDay === dateStr) {
+            setExpandedDay(null)
+            resetForm()
+        } else {
+            const entry = timeEntries.find(e => new Date(e.date).toDateString() === dateStr)
+            if (entry) {
+                // Load existing entry
+                setEntryType(entry.type)
+                setNote(entry.note || '')
+                if (entry.startTime && entry.endTime) {
+                    setTimeSlots([{ startTime: entry.startTime, endTime: entry.endTime }])
+                }
+            } else {
+                resetForm()
+            }
+            setExpandedDay(dateStr)
+        }
+    }
+
+    const resetForm = () => {
+        setTimeSlots([{ startTime: '08:00', endTime: '12:00' }])
+        setEntryType('work')
+        setNote('')
+    }
+
+    const addTimeSlot = () => {
+        setTimeSlots([...timeSlots, { startTime: '13:00', endTime: '17:00' }])
+    }
+
+    const removeTimeSlot = (index: number) => {
+        setTimeSlots(timeSlots.filter((_, i) => i !== index))
+    }
+
+    const updateTimeSlot = (index: number, field: 'startTime' | 'endTime', value: string) => {
+        const updated = [...timeSlots]
+        updated[index][field] = value
+        setTimeSlots(updated)
+    }
+
+    const calculateTotalHours = () => {
+        let totalMinutes = 0
+        timeSlots.forEach(slot => {
+            const [startH, startM] = slot.startTime.split(':').map(Number)
+            const [endH, endM] = slot.endTime.split(':').map(Number)
+            const startMinutes = startH * 60 + startM
+            const endMinutes = endH * 60 + endM
+            totalMinutes += endMinutes - startMinutes
+        })
+        return totalMinutes / 60
+    }
+
+    const calculateBreakMinutes = () => {
+        if (timeSlots.length < 2) return 0
+
+        // Sort slots by start time
+        const sorted = [...timeSlots].sort((a, b) => a.startTime.localeCompare(b.startTime))
+        let breakMinutes = 0
+
+        for (let i = 0; i < sorted.length - 1; i++) {
+            const [endH, endM] = sorted[i].endTime.split(':').map(Number)
+            const [startH, startM] = sorted[i + 1].startTime.split(':').map(Number)
+            const endMinutes = endH * 60 + endM
+            const startMinutes = startH * 60 + startM
+            breakMinutes += startMinutes - endMinutes
+        }
+
+        return breakMinutes
+    }
+
+    const checkBreakCompliance = (hours: number, breakMinutes: number) => {
+        if (hours > 9 && breakMinutes < 45) {
+            return { compliant: false, required: 45, message: 'Nach 9 Stunden sind 45 Min. Pause erforderlich' }
+        }
+        if (hours > 6 && breakMinutes < 30) {
+            return { compliant: false, required: 30, message: 'Nach 6 Stunden sind 30 Min. Pause erforderlich' }
+        }
+        return { compliant: true, required: 0, message: '' }
+    }
+
+    const saveEntry = async () => {
+        if (!selectedEmployee || !expandedDay) return
+
+        const totalHours = calculateTotalHours()
+        const breakMinutes = calculateBreakMinutes()
+        const breakCheck = checkBreakCompliance(totalHours, breakMinutes)
+
+        if (!breakCheck.compliant) {
+            if (!confirm(`${breakCheck.message}. Trotzdem speichern?`)) {
+                return
+            }
+        }
+
+        const existingEntry = timeEntries.find(e => new Date(e.date).toDateString() === expandedDay)
 
         try {
             const url = '/api/time-entries'
-            const method = editingEntry ? 'PATCH' : 'POST'
-            const body = editingEntry
-                ? { id: editingEntry.id, ...formData }
-                : {
-                    userId: selectedEmployee.id,
-                    date: selectedDate.toISOString(),
-                    ...formData
-                }
+            const method = existingEntry ? 'PATCH' : 'POST'
+
+            // For work entries, use time slots. For others, just mark the day
+            const body = entryType === 'work' ? {
+                ...(existingEntry && { id: existingEntry.id }),
+                userId: selectedEmployee.id,
+                date: new Date(expandedDay).toISOString(),
+                type: entryType,
+                startTime: timeSlots[0].startTime,
+                endTime: timeSlots[timeSlots.length - 1].endTime,
+                breakMinutes,
+                hours: totalHours,
+                note
+            } : {
+                ...(existingEntry && { id: existingEntry.id }),
+                userId: selectedEmployee.id,
+                date: new Date(expandedDay).toISOString(),
+                type: entryType,
+                note
+            }
 
             const res = await fetch(url, {
                 method,
@@ -108,50 +213,38 @@ export default function CalendarPage() {
             })
 
             if (res.ok) {
-                setIsModalOpen(false)
-                setEditingEntry(null)
+                setExpandedDay(null)
                 fetchTimeEntries()
                 fetchEmployees()
-                setFormData({ type: 'work', hours: 8, note: '' })
+                resetForm()
             }
         } catch (error) {
             console.error('Failed to save entry', error)
         }
     }
 
-    const handleDelete = async (id: string) => {
+    const deleteEntry = async () => {
+        if (!expandedDay) return
+
+        const entry = timeEntries.find(e => new Date(e.date).toDateString() === expandedDay)
+        if (!entry) return
+
         if (!confirm('Eintrag wirklich löschen?')) return
 
         try {
-            const res = await fetch(`/api/time-entries?id=${id}`, {
+            const res = await fetch(`/api/time-entries?id=${entry.id}`, {
                 method: 'DELETE'
             })
 
             if (res.ok) {
+                setExpandedDay(null)
                 fetchTimeEntries()
                 fetchEmployees()
+                resetForm()
             }
         } catch (error) {
             console.error('Failed to delete entry', error)
         }
-    }
-
-    const openAddModal = (date: Date) => {
-        setSelectedDate(date)
-        setEditingEntry(null)
-        setFormData({ type: 'work', hours: 8, note: '' })
-        setIsModalOpen(true)
-    }
-
-    const openEditModal = (entry: TimeEntry) => {
-        setEditingEntry(entry)
-        setSelectedDate(new Date(entry.date))
-        setFormData({
-            type: entry.type,
-            hours: entry.hours || 8,
-            note: entry.note || ''
-        })
-        setIsModalOpen(true)
     }
 
     const getDaysInMonth = () => {
@@ -196,7 +289,23 @@ export default function CalendarPage() {
         return 'text-green-400'
     }
 
-    const getStatusText = (deficit: number) => {
+    const getStatusText = (date: Date, entry: TimeEntry | undefined) => {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const checkDate = new Date(date)
+        checkDate.setHours(0, 0, 0, 0)
+
+        const dayOfWeek = date.getDay()
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+
+        if (isWeekend) return ''
+        if (checkDate > today) return '' // Future dates
+
+        if (!entry) {
+            return '⚠ Eintrag fehlt'
+        }
+
+        const deficit = calculateDailyDeficit(date)
         if (deficit < 0) return '⚠ Pending'
         if (deficit === 0) return '✓ OK'
         return '✓ Überstunden'
@@ -248,6 +357,7 @@ export default function CalendarPage() {
                             onChange={(e) => {
                                 const emp = employees.find(emp => emp.id === e.target.value)
                                 setSelectedEmployee(emp || null)
+                                setExpandedDay(null)
                             }}
                             className="bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
                         >
@@ -280,7 +390,7 @@ export default function CalendarPage() {
                         </button>
                     </div>
 
-                    <div className="w-[200px]"></div> {/* Spacer for alignment */}
+                    <div className="w-[200px]"></div>
                 </div>
 
                 {/* Time Entry Table */}
@@ -289,12 +399,12 @@ export default function CalendarPage() {
                         <table className="w-full text-left">
                             <thead>
                                 <tr className="bg-slate-800/50 border-b border-slate-700">
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider w-8"></th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Tag</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Stunden gearbeitet</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Pausen</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Überstunden / Defizit</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Aktionen</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-700">
@@ -308,84 +418,214 @@ export default function CalendarPage() {
                                         const deficit = calculateDailyDeficit(date)
                                         const dayOfWeek = date.getDay()
                                         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+                                        const dateStr = date.toDateString()
+                                        const isExpanded = expandedDay === dateStr
+                                        const today = new Date()
+                                        today.setHours(0, 0, 0, 0)
+                                        const checkDate = new Date(date)
+                                        checkDate.setHours(0, 0, 0, 0)
+                                        const isFuture = checkDate > today
 
                                         return (
-                                            <tr
-                                                key={date.toISOString()}
-                                                className={`hover:bg-slate-800/30 transition-colors ${isWeekend ? 'bg-slate-900/30' : ''}`}
-                                            >
-                                                <td className="px-6 py-4">
-                                                    <div>
-                                                        <p className="font-medium text-white">
-                                                            {date.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                                        </p>
-                                                        {isWeekend && (
-                                                            <span className="text-xs text-slate-500">Wochenende</span>
+                                            <React.Fragment key={dateStr}>
+                                                <tr
+                                                    className={`hover:bg-slate-800/30 transition-colors cursor-pointer ${isWeekend ? 'bg-slate-900/30' : ''
+                                                        } ${isFuture ? 'opacity-50' : ''}`}
+                                                    onClick={() => !isFuture && toggleDay(dateStr)}
+                                                >
+                                                    <td className="px-6 py-4">
+                                                        {!isFuture && (
+                                                            isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />
                                                         )}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    {entry ? (
+                                                    </td>
+                                                    <td className="px-6 py-4">
                                                         <div>
-                                                            <p className="text-white font-medium">
-                                                                {entry.type === 'work' ? `${entry.hours || 0}h` : getTypeLabel(entry.type)}
+                                                            <p className="font-medium text-white">
+                                                                {date.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
                                                             </p>
-                                                            {entry.note && (
-                                                                <p className="text-xs text-slate-400 mt-1">{entry.note}</p>
+                                                            {isWeekend && (
+                                                                <span className="text-xs text-slate-500">Wochenende</span>
                                                             )}
                                                         </div>
-                                                    ) : (
-                                                        <span className="text-slate-500">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <span className="text-slate-500">—</span>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    {!isWeekend && (
-                                                        <span className={`font-medium ${getStatusColor(deficit)}`}>
-                                                            {deficit > 0 ? '+' : ''}{deficit.toFixed(1)}h
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    {!isWeekend && (
-                                                        <span className={getStatusColor(deficit)}>
-                                                            {getStatusText(deficit)}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-2">
+                                                    </td>
+                                                    <td className="px-6 py-4">
                                                         {entry ? (
-                                                            <>
-                                                                <button
-                                                                    onClick={() => openEditModal(entry)}
-                                                                    className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-700/50 rounded transition-colors"
-                                                                    title="Bearbeiten"
-                                                                >
-                                                                    <Edit2 size={14} />
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleDelete(entry.id)}
-                                                                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700/50 rounded transition-colors"
-                                                                    title="Löschen"
-                                                                >
-                                                                    <Trash2 size={14} />
-                                                                </button>
-                                                            </>
+                                                            <div>
+                                                                <p className="text-white font-medium">
+                                                                    {entry.type === 'work' ? `${entry.hours?.toFixed(1) || 0}h` : getTypeLabel(entry.type)}
+                                                                </p>
+                                                                {entry.startTime && entry.endTime && (
+                                                                    <p className="text-xs text-slate-400">{entry.startTime} - {entry.endTime}</p>
+                                                                )}
+                                                                {entry.note && (
+                                                                    <p className="text-xs text-slate-400 mt-1">{entry.note}</p>
+                                                                )}
+                                                            </div>
                                                         ) : (
-                                                            <button
-                                                                onClick={() => openAddModal(date)}
-                                                                className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-700/50 rounded transition-colors"
-                                                                title="Eintrag hinzufügen"
-                                                            >
-                                                                <Plus size={14} />
-                                                            </button>
+                                                            <span className="text-slate-500">—</span>
                                                         )}
-                                                    </div>
-                                                </td>
-                                            </tr>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {entry?.breakMinutes ? (
+                                                            <span className="text-white">{entry.breakMinutes} Min.</span>
+                                                        ) : (
+                                                            <span className="text-slate-500">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {!isWeekend && !isFuture && (
+                                                            <span className={`font-medium ${getStatusColor(deficit)}`}>
+                                                                {deficit > 0 ? '+' : ''}{deficit.toFixed(1)}h
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className={getStatusColor(deficit)}>
+                                                            {getStatusText(date, entry)}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+
+                                                {/* Expanded Row */}
+                                                {isExpanded && (
+                                                    <tr className="bg-slate-800/50">
+                                                        <td colSpan={6} className="px-6 py-6">
+                                                            <div className="max-w-4xl space-y-4">
+                                                                <div className="flex items-center justify-between mb-4">
+                                                                    <h3 className="text-lg font-semibold text-white">
+                                                                        Eintrag für {date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                                                    </h3>
+                                                                    {entry && (
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                deleteEntry()
+                                                                            }}
+                                                                            className="text-red-400 hover:text-red-300 text-sm flex items-center gap-1"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                            Löschen
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-slate-300 mb-2">Typ</label>
+                                                                    <select
+                                                                        value={entryType}
+                                                                        onChange={(e) => setEntryType(e.target.value as any)}
+                                                                        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                    >
+                                                                        <option value="work">Arbeit</option>
+                                                                        <option value="vacation">Urlaub</option>
+                                                                        <option value="sick">Krank</option>
+                                                                        <option value="holiday">Feiertag</option>
+                                                                    </select>
+                                                                </div>
+
+                                                                {entryType === 'work' && (
+                                                                    <>
+                                                                        <div>
+                                                                            <label className="block text-sm font-medium text-slate-300 mb-2">Arbeitszeiten</label>
+                                                                            <div className="space-y-2">
+                                                                                {timeSlots.map((slot, index) => (
+                                                                                    <div key={index} className="flex items-center gap-3">
+                                                                                        <input
+                                                                                            type="time"
+                                                                                            value={slot.startTime}
+                                                                                            onChange={(e) => updateTimeSlot(index, 'startTime', e.target.value)}
+                                                                                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                        />
+                                                                                        <span className="text-slate-400">bis</span>
+                                                                                        <input
+                                                                                            type="time"
+                                                                                            value={slot.endTime}
+                                                                                            onChange={(e) => updateTimeSlot(index, 'endTime', e.target.value)}
+                                                                                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                        />
+                                                                                        {timeSlots.length > 1 && (
+                                                                                            <button
+                                                                                                onClick={() => removeTimeSlot(index)}
+                                                                                                className="p-2 text-red-400 hover:bg-red-500/10 rounded"
+                                                                                            >
+                                                                                                <Trash2 size={16} />
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                            <button
+                                                                                onClick={addTimeSlot}
+                                                                                className="mt-3 flex items-center gap-2 text-primary hover:text-primary/80 text-sm"
+                                                                            >
+                                                                                <Plus size={16} />
+                                                                                Weiteren Zeitraum hinzufügen
+                                                                            </button>
+                                                                        </div>
+
+                                                                        <div className="grid grid-cols-3 gap-4 p-4 bg-slate-900/50 rounded-lg">
+                                                                            <div>
+                                                                                <p className="text-xs text-slate-400 mb-1">Arbeitsstunden</p>
+                                                                                <p className="text-lg font-semibold text-white">{calculateTotalHours().toFixed(1)}h</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-xs text-slate-400 mb-1">Pausenzeit</p>
+                                                                                <p className="text-lg font-semibold text-white">{calculateBreakMinutes()} Min.</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-xs text-slate-400 mb-1">Pausenpflicht</p>
+                                                                                {(() => {
+                                                                                    const check = checkBreakCompliance(calculateTotalHours(), calculateBreakMinutes())
+                                                                                    return check.compliant ? (
+                                                                                        <p className="text-lg font-semibold text-green-400">✓ Erfüllt</p>
+                                                                                    ) : (
+                                                                                        <div className="flex items-center gap-1">
+                                                                                            <AlertTriangle size={16} className="text-amber-400" />
+                                                                                            <p className="text-sm text-amber-400">{check.required} Min. nötig</p>
+                                                                                        </div>
+                                                                                    )
+                                                                                })()}
+                                                                            </div>
+                                                                        </div>
+                                                                    </>
+                                                                )}
+
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-slate-300 mb-2">Notiz (optional)</label>
+                                                                    <textarea
+                                                                        value={note}
+                                                                        onChange={(e) => setNote(e.target.value)}
+                                                                        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                        rows={2}
+                                                                    />
+                                                                </div>
+
+                                                                <div className="flex justify-end gap-3 pt-4">
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            setExpandedDay(null)
+                                                                            resetForm()
+                                                                        }}
+                                                                        className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                                                                    >
+                                                                        Abbrechen
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            saveEntry()
+                                                                        }}
+                                                                        className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
+                                                                    >
+                                                                        Speichern
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
                                         )
                                     })
                                 )}
@@ -394,76 +634,6 @@ export default function CalendarPage() {
                     </div>
                 </div>
             </div>
-
-            {/* Add/Edit Entry Modal */}
-            <Modal
-                isOpen={isModalOpen}
-                onClose={() => {
-                    setIsModalOpen(false)
-                    setEditingEntry(null)
-                }}
-                title={`${editingEntry ? 'Eintrag bearbeiten' : 'Eintrag hinzufügen'} - ${selectedDate?.toLocaleDateString('de-DE')}`}
-            >
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1.5">Typ</label>
-                        <select
-                            value={formData.type}
-                            onChange={e => setFormData({ ...formData, type: e.target.value as any })}
-                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                            <option value="work">Arbeit</option>
-                            <option value="vacation">Urlaub</option>
-                            <option value="sick">Krank</option>
-                            <option value="holiday">Feiertag</option>
-                        </select>
-                    </div>
-
-                    {formData.type === 'work' && (
-                        <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Stunden</label>
-                            <input
-                                type="number"
-                                step="0.5"
-                                min="0"
-                                max="24"
-                                value={formData.hours}
-                                onChange={e => setFormData({ ...formData, hours: parseFloat(e.target.value) })}
-                                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                        </div>
-                    )}
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1.5">Notiz (optional)</label>
-                        <textarea
-                            value={formData.note}
-                            onChange={e => setFormData({ ...formData, note: e.target.value })}
-                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            rows={3}
-                        />
-                    </div>
-
-                    <div className="pt-4 flex justify-end gap-3">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setIsModalOpen(false)
-                                setEditingEntry(null)
-                            }}
-                            className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-                        >
-                            Abbrechen
-                        </button>
-                        <button
-                            type="submit"
-                            className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
-                        >
-                            {editingEntry ? 'Aktualisieren' : 'Hinzufügen'}
-                        </button>
-                    </div>
-                </form>
-            </Modal>
         </AppLayout>
     )
 }

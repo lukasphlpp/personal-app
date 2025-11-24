@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { DollarSign, Clock, TrendingUp, Users } from 'lucide-react'
+import { DollarSign, Clock, TrendingUp, Users, Edit2, Check, X } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import Link from 'next/link'
 
@@ -11,6 +11,7 @@ interface Employee {
     firstName: string
     lastName: string
     weeklyHours: number
+    hourlyRate: number
     overtimeBalance: number
     color: string
 }
@@ -18,7 +19,8 @@ interface Employee {
 export default function PayrollPage() {
     const [employees, setEmployees] = useState<Employee[]>([])
     const [loading, setLoading] = useState(true)
-    const [hourlyRate] = useState(15) // Default hourly rate, can be made configurable
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [editRate, setEditRate] = useState(0)
 
     useEffect(() => {
         fetchEmployees()
@@ -36,16 +38,52 @@ export default function PayrollPage() {
         }
     }
 
-    // Calculate total hours worked (simplified - would need actual time entries)
-    const calculateTotalHours = (weeklyHours: number) => {
-        // Assuming 4 weeks per month
-        return weeklyHours * 4
+    const startEdit = (employee: Employee) => {
+        setEditingId(employee.id)
+        setEditRate(employee.hourlyRate)
     }
 
-    const calculateSalary = (weeklyHours: number) => {
-        const totalHours = calculateTotalHours(weeklyHours)
-        return (totalHours * hourlyRate).toFixed(2)
+    const saveEdit = async () => {
+        if (!editingId) return
+
+        try {
+            const res = await fetch('/api/employees', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: editingId,
+                    hourlyRate: editRate
+                })
+            })
+
+            if (res.ok) {
+                setEditingId(null)
+                fetchEmployees()
+            }
+        } catch (error) {
+            console.error('Failed to update hourly rate', error)
+        }
     }
+
+    const cancelEdit = () => {
+        setEditingId(null)
+        setEditRate(0)
+    }
+
+    // Calculate total hours worked (simplified - would need actual time entries)
+    const calculateMonthlyHours = (weeklyHours: number) => {
+        // Assuming 4.33 weeks per month (52 weeks / 12 months)
+        return weeklyHours * 4.33
+    }
+
+    const calculateMonthlySalary = (weeklyHours: number, hourlyRate: number) => {
+        const totalHours = calculateMonthlyHours(weeklyHours)
+        return totalHours * hourlyRate
+    }
+
+    const totalMonthlyCost = employees.reduce((sum, emp) =>
+        sum + calculateMonthlySalary(emp.weeklyHours, emp.hourlyRate), 0
+    )
 
     return (
         <AppLayout>
@@ -54,7 +92,7 @@ export default function PayrollPage() {
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold text-white mb-2">Vorbereitende Lohnbuchhaltung</h1>
-                        <p className="text-secondary">Übersicht über Mitarbeiter und Arbeitsstunden</p>
+                        <p className="text-secondary">Übersicht über Mitarbeiter und Lohnkosten</p>
                     </div>
                     <Link
                         href="/employees"
@@ -69,7 +107,7 @@ export default function PayrollPage() {
                     <div className="bg-surface border border-slate-700 rounded-xl p-6">
                         <div className="flex items-center gap-3 mb-2">
                             <Users className="text-primary" size={24} />
-                            <h3 className="text-slate-400 text-sm font-medium">Mitarbeitende Person</h3>
+                            <h3 className="text-slate-400 text-sm font-medium">Mitarbeitende Personen</h3>
                         </div>
                         <p className="text-3xl font-bold text-white">{employees.length}</p>
                     </div>
@@ -80,23 +118,25 @@ export default function PayrollPage() {
                             <h3 className="text-slate-400 text-sm font-medium">Gesamt Wochenstunden</h3>
                         </div>
                         <p className="text-3xl font-bold text-white">
-                            {employees.reduce((sum, emp) => sum + emp.weeklyHours, 0)} Stunden
+                            {employees.reduce((sum, emp) => sum + emp.weeklyHours, 0).toFixed(1)} h
                         </p>
                     </div>
 
                     <div className="bg-surface border border-slate-700 rounded-xl p-6">
                         <div className="flex items-center gap-3 mb-2">
-                            <TrendingUp className="text-green-400" size={24} />
-                            <h3 className="text-slate-400 text-sm font-medium">Durchschn. Stundensatz</h3>
+                            <DollarSign className="text-green-400" size={24} />
+                            <h3 className="text-slate-400 text-sm font-medium">Monatliche Gesamtlohnkosten</h3>
                         </div>
-                        <p className="text-3xl font-bold text-white">{hourlyRate},00 €</p>
+                        <p className="text-3xl font-bold text-green-400">
+                            {totalMonthlyCost.toFixed(2)} €
+                        </p>
                     </div>
                 </div>
 
                 {/* Employee List */}
                 <div className="bg-surface border border-slate-700 rounded-xl overflow-hidden">
                     <div className="p-6 border-b border-slate-700">
-                        <h2 className="text-lg font-semibold text-white">Mitarbeitende Person</h2>
+                        <h2 className="text-lg font-semibold text-white">Mitarbeitende Personen</h2>
                     </div>
 
                     {loading ? (
@@ -128,27 +168,60 @@ export default function PayrollPage() {
                                     <div className="grid grid-cols-3 gap-8 flex-1">
                                         <div className="text-center">
                                             <p className="text-xs text-slate-400 mb-1">Stundensatz</p>
-                                            <p className="text-lg font-semibold text-white">{hourlyRate},00 €</p>
+                                            {editingId === employee.id ? (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <input
+                                                        type="number"
+                                                        step="0.5"
+                                                        value={editRate}
+                                                        onChange={(e) => setEditRate(parseFloat(e.target.value))}
+                                                        className="w-20 bg-slate-900/50 border border-slate-700 rounded px-2 py-1 text-white text-center"
+                                                    />
+                                                    <span className="text-white">€</span>
+                                                    <button
+                                                        onClick={saveEdit}
+                                                        className="p-1 text-green-400 hover:bg-green-500/10 rounded"
+                                                    >
+                                                        <Check size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={cancelEdit}
+                                                        className="p-1 text-red-400 hover:bg-red-500/10 rounded"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <p className="text-lg font-semibold text-white">{employee.hourlyRate.toFixed(2)} €</p>
+                                                    <button
+                                                        onClick={() => startEdit(employee)}
+                                                        className="p-1 text-slate-400 hover:text-primary"
+                                                    >
+                                                        <Edit2 size={14} />
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="text-center">
                                             <p className="text-xs text-slate-400 mb-1">Wochenstunden</p>
-                                            <p className="text-lg font-semibold text-white">{employee.weeklyHours} Stunden</p>
+                                            <p className="text-lg font-semibold text-white">{employee.weeklyHours} h</p>
                                         </div>
 
                                         <div className="text-center">
-                                            <p className="text-xs text-slate-400 mb-1">Stunden gesamt (Monat)</p>
+                                            <p className="text-xs text-slate-400 mb-1">Monatsstunden</p>
                                             <p className="text-lg font-semibold text-white">
-                                                {calculateTotalHours(employee.weeklyHours)} Stunden
+                                                {calculateMonthlyHours(employee.weeklyHours).toFixed(1)} h
                                             </p>
                                         </div>
                                     </div>
 
                                     {/* Salary */}
                                     <div className="text-right ml-8">
-                                        <p className="text-xs text-slate-400 mb-1">Geschätztes Gehalt</p>
+                                        <p className="text-xs text-slate-400 mb-1">Monatliches Gehalt</p>
                                         <p className="text-xl font-bold text-primary">
-                                            {calculateSalary(employee.weeklyHours)} €
+                                            {calculateMonthlySalary(employee.weeklyHours, employee.hourlyRate).toFixed(2)} €
                                         </p>
                                     </div>
                                 </div>

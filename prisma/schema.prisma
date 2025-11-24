@@ -19,6 +19,7 @@ model User {
   lastName        String
   role            Role      @default(EMPLOYEE)
   weeklyHours     Float     @default(40) // Soll-Stunden pro Woche
+  hourlyRate      Float     @default(15) // Stundensatz in €
   overtimeBalance Float     @default(0)  // Aktueller Überstunden-Stand
   color           String    @default("#3b82f6")
   startDate       DateTime  @default(now())
@@ -35,7 +36,10 @@ model TimeEntry {
   userId      String
   date        DateTime
   type        EntryType
-  hours       Float?
+  startTime   String?       // Format: "HH:MM" (z.B. "07:00")
+  endTime     String?       // Format: "HH:MM" (z.B. "11:00")
+  breakMinutes Int?         // Pausenzeit in Minuten
+  hours       Float?        // Berechnete Arbeitsstunden
   note        String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
