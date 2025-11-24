@@ -3,6 +3,7 @@
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
+import AppLayout from '@/components/AppLayout'
 
 export default function DashboardPage() {
     const { data: session, status } = useSession()
@@ -19,27 +20,34 @@ export default function DashboardPage() {
     }
 
     return (
-        <div className="p-8">
-            <h1 className="text-3xl font-bold text-white mb-4">Dashboard</h1>
-            <div className="bg-surface border border-slate-700 rounded-xl p-6">
-                <h2 className="text-xl font-semibold text-white mb-2">Willkommen zurück, {session?.user?.firstName}! 👋</h2>
-                <p className="text-secondary mb-4">Du bist eingeloggt als: <span className="text-primary font-mono">{session?.user?.role}</span></p>
+        <AppLayout>
+            <div className="mb-8">
+                <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
+                <p className="text-secondary">Willkommen zurück, {session?.user?.firstName}! 👋</p>
+            </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
-                    <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                        <h3 className="text-slate-400 text-sm font-medium mb-1">Status</h3>
-                        <p className="text-green-400 font-bold">Aktiv</p>
-                    </div>
-                    <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                        <h3 className="text-slate-400 text-sm font-medium mb-1">Email</h3>
-                        <p className="text-white">{session?.user?.email}</p>
-                    </div>
-                    <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                        <h3 className="text-slate-400 text-sm font-medium mb-1">User ID</h3>
-                        <p className="text-slate-500 text-xs font-mono truncate">{session?.user?.id}</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Stats Cards */}
+                <div className="bg-surface border border-slate-700 rounded-xl p-6 shadow-lg">
+                    <h3 className="text-slate-400 text-sm font-medium mb-2">Status</h3>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+                        <p className="text-2xl font-bold text-white">Aktiv</p>
                     </div>
                 </div>
+
+                <div className="bg-surface border border-slate-700 rounded-xl p-6 shadow-lg">
+                    <h3 className="text-slate-400 text-sm font-medium mb-2">Deine Rolle</h3>
+                    <p className="text-2xl font-bold text-primary">{session?.user?.role}</p>
+                </div>
+
+                <div className="bg-surface border border-slate-700 rounded-xl p-6 shadow-lg">
+                    <h3 className="text-slate-400 text-sm font-medium mb-2">User ID</h3>
+                    <p className="text-lg font-mono text-slate-300 truncate" title={session?.user?.id}>
+                        {session?.user?.id?.substring(0, 8)}...
+                    </p>
+                </div>
             </div>
-        </div>
+        </AppLayout>
     )
 }
