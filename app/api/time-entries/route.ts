@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json()
-        const { userId, date, type, timeSlots, breakMinutes, hours, note } = body
+        const { userId, date, type, halfDay, timeSlots, breakMinutes, hours, note } = body
 
         if (!userId || !date || !type) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
                 userId,
                 date: new Date(date),
                 type,
+                halfDay: halfDay || null,
                 timeSlots: timeSlots || null,
                 breakMinutes: breakMinutes !== undefined ? breakMinutes : null,
                 hours: hours || null,
@@ -86,7 +87,7 @@ export async function PATCH(request: Request) {
         }
 
         const body = await request.json()
-        const { id, type, timeSlots, breakMinutes, hours, note } = body
+        const { id, type, halfDay, timeSlots, breakMinutes, hours, note } = body
 
         if (!id) {
             return NextResponse.json({ error: 'ID required' }, { status: 400 })
@@ -96,6 +97,7 @@ export async function PATCH(request: Request) {
             where: { id },
             data: {
                 ...(type && { type }),
+                ...(halfDay !== undefined && { halfDay }),
                 ...(timeSlots !== undefined && { timeSlots }),
                 ...(breakMinutes !== undefined && { breakMinutes }),
                 ...(hours !== undefined && { hours }),
@@ -151,9 +153,8 @@ async function updateOvertimeBalance(userId: string) {
 
     if (!user) return
 
-    const dailyTarget = user.weeklyHours / 5 // Assuming 5-day work week
+    const dailyTarget = user.weeklyHours / 5
 
-    // Calculate total worked hours vs expected
     let totalWorked = 0
     let totalExpected = 0
 
@@ -164,7 +165,7 @@ async function updateOvertimeBalance(userId: string) {
     let currentDate = new Date(startDate)
     while (currentDate <= today) {
         const dayOfWeek = currentDate.getDay()
-        // Skip weekends (0 = Sunday, 6 = Saturday)
+        // Skip weekends
         if (dayOfWeek !== 0 && dayOfWeek !== 6) {
             totalExpected += dailyTarget
 
@@ -174,11 +175,18 @@ async function updateOvertimeBalance(userId: string) {
                 return entryDate.toDateString() === currentDate.toDateString()
             })
 
-            if (entry && entry.type === 'work' && entry.hours) {
-                totalWorked += entry.hours
-            } else if (entry && (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday')) {
-                // Count as target hours (no overtime impact)
-                totalWorked += dailyTarget
+            if (entry) {
+                if (entry.type === 'work' && entry.hours) {
+                    totalWorked += entry.hours
+                } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday') {
+                    // Full day or half day
+                    const hoursToAdd = entry.halfDay ? dailyTarget / 2 : dailyTarget
+                    totalWorked += hoursToAdd
+                } else if (entry.type === 'overtime_reduction') {
+                    // Überstunden abbauen - counts as worked but reduces expected
+                    const hoursToAdd = entry.halfDay ? dailyTarget / 2 : dailyTarget
+                    totalWorked += hoursToAdd
+                }
             }
         }
 
@@ -187,11 +195,9 @@ async function updateOvertimeBalance(userId: string) {
 
     const overtimeBalance = totalWorked - totalExpected
 
-    // Apply limits: -20 to +40
-    const limitedBalance = Math.max(-20, Math.min(40, overtimeBalance))
-
+    // NO LIMITS - just save the actual balance
     await prisma.user.update({
         where: { id: userId },
-        data: { overtimeBalance: limitedBalance }
+        data: { overtimeBalance }
     })
 }
