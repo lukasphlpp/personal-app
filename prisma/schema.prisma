@@ -1,0 +1,68 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          Role      @default(EMPLOYEE)
+  department    String?
+  color         String    @default("#3b82f6")
+  startDate     DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  timeEntries   TimeEntry[]
+  
+  @@map("users")
+}
+
+model TimeEntry {
+  id          String        @id @default(cuid())
+  userId      String
+  date        DateTime
+  type        EntryType
+  hours       Float?
+  note        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("time_entries")
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  value       String    @unique
+  label       String
+  color       String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@map("categories")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum EntryType {
+  work
+  vacation
+  sick
+  holiday
+}
