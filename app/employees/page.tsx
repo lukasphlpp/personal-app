@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { Plus, Search, Mail, Clock, Calendar as CalendarIcon, TrendingUp, TrendingDown, Edit2 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import Modal from '@/components/Modal'
@@ -148,13 +149,21 @@ export default function EmployeesPage() {
                         <h1 className="text-3xl font-bold text-white mb-2">Mitarbeiter</h1>
                         <p className="text-secondary">Verwalte dein Team und Arbeitszeitkonten</p>
                     </div>
-                    <button
-                        onClick={() => setIsModalOpen(true)}
-                        className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2.5 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
-                    >
-                        <Plus size={20} />
-                        Mitarbeiter hinzufügen
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <Link
+                            href="/employees/payroll"
+                            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-lg font-medium transition-colors"
+                        >
+                            Lohnbuchhaltung
+                        </Link>
+                        <button
+                            onClick={() => setIsModalOpen(true)}
+                            className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2.5 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
+                        >
+                            <Plus size={20} />
+                            Mitarbeiter hinzufügen
+                        </button>
+                    </div>
                 </div>
 
                 {/* Search & Filter */}
@@ -222,10 +231,10 @@ export default function EmployeesPage() {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${employee.role === 'ADMIN'
-                                                        ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                                                        : employee.role === 'MANAGER'
-                                                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                                                            : 'bg-slate-700/50 text-slate-300 border-slate-600'
+                                                    ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                                                    : employee.role === 'MANAGER'
+                                                        ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                                                        : 'bg-slate-700/50 text-slate-300 border-slate-600'
                                                     }`}>
                                                     {employee.role}
                                                 </span>

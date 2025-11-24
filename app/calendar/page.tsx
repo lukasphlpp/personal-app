@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import Modal from '@/components/Modal'
 
@@ -11,6 +11,7 @@ interface Employee {
     firstName: string
     lastName: string
     weeklyHours: number
+    overtimeBalance: number
     color: string
 }
 
@@ -31,6 +32,7 @@ export default function CalendarPage() {
     const [loading, setLoading] = useState(false)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+    const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null)
 
     // Form state
     const [formData, setFormData] = useState({
@@ -84,58 +86,83 @@ export default function CalendarPage() {
         }
     }
 
-    const handleAddEntry = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedEmployee || !selectedDate) return
 
         try {
-            const res = await fetch('/api/time-entries', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const url = '/api/time-entries'
+            const method = editingEntry ? 'PATCH' : 'POST'
+            const body = editingEntry
+                ? { id: editingEntry.id, ...formData }
+                : {
                     userId: selectedEmployee.id,
                     date: selectedDate.toISOString(),
                     ...formData
-                })
+                }
+
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
             })
 
             if (res.ok) {
                 setIsModalOpen(false)
+                setEditingEntry(null)
                 fetchTimeEntries()
-                fetchEmployees() // Refresh to update overtime balance
+                fetchEmployees()
                 setFormData({ type: 'work', hours: 8, note: '' })
             }
         } catch (error) {
-            console.error('Failed to add entry', error)
+            console.error('Failed to save entry', error)
+        }
+    }
+
+    const handleDelete = async (id: string) => {
+        if (!confirm('Eintrag wirklich löschen?')) return
+
+        try {
+            const res = await fetch(`/api/time-entries?id=${id}`, {
+                method: 'DELETE'
+            })
+
+            if (res.ok) {
+                fetchTimeEntries()
+                fetchEmployees()
+            }
+        } catch (error) {
+            console.error('Failed to delete entry', error)
         }
     }
 
     const openAddModal = (date: Date) => {
         setSelectedDate(date)
+        setEditingEntry(null)
+        setFormData({ type: 'work', hours: 8, note: '' })
         setIsModalOpen(true)
     }
 
-    // Calendar helpers
+    const openEditModal = (entry: TimeEntry) => {
+        setEditingEntry(entry)
+        setSelectedDate(new Date(entry.date))
+        setFormData({
+            type: entry.type,
+            hours: entry.hours || 8,
+            note: entry.note || ''
+        })
+        setIsModalOpen(true)
+    }
+
     const getDaysInMonth = () => {
         const year = currentDate.getFullYear()
         const month = currentDate.getMonth()
-        const firstDay = new Date(year, month, 1)
-        const lastDay = new Date(year, month + 1, 0)
-        const daysInMonth = lastDay.getDate()
-        const startingDayOfWeek = firstDay.getDay()
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-        const days: (Date | null)[] = []
-
-        // Add empty cells for days before month starts
-        for (let i = 0; i < (startingDayOfWeek === 0 ? 6 : startingDayOfWeek - 1); i++) {
-            days.push(null)
-        }
-
-        // Add days of month
+        const days: Date[] = []
         for (let day = 1; day <= daysInMonth; day++) {
             days.push(new Date(year, month, day))
         }
-
         return days
     }
 
@@ -146,23 +173,33 @@ export default function CalendarPage() {
         })
     }
 
-    const getDayColor = (date: Date) => {
-        if (!selectedEmployee) return 'bg-slate-800'
+    const calculateDailyDeficit = (date: Date) => {
+        if (!selectedEmployee) return 0
 
         const entry = getEntryForDate(date)
-        if (!entry) return 'bg-slate-800'
-
         const dailyTarget = selectedEmployee.weeklyHours / 5
 
-        if (entry.type !== 'work') {
-            return 'bg-blue-500/20 border-blue-500/30' // Vacation/Sick/Holiday
-        }
+        // Skip weekends
+        const dayOfWeek = date.getDay()
+        if (dayOfWeek === 0 || dayOfWeek === 6) return 0
 
-        if (!entry.hours) return 'bg-slate-800'
+        if (!entry) return -dailyTarget
 
-        if (entry.hours < dailyTarget) return 'bg-red-500/20 border-red-500/30'
-        if (entry.hours === dailyTarget) return 'bg-slate-700/50 border-slate-600'
-        return 'bg-green-500/20 border-green-500/30'
+        if (entry.type !== 'work') return 0 // Vacation/sick/holiday count as target
+
+        return (entry.hours || 0) - dailyTarget
+    }
+
+    const getStatusColor = (deficit: number) => {
+        if (deficit < 0) return 'text-red-400'
+        if (deficit === 0) return 'text-slate-400'
+        return 'text-green-400'
+    }
+
+    const getStatusText = (deficit: number) => {
+        if (deficit < 0) return '⚠ Pending'
+        if (deficit === 0) return '✓ OK'
+        return '✓ Überstunden'
     }
 
     const getTypeLabel = (type: string) => {
@@ -173,16 +210,6 @@ export default function CalendarPage() {
             holiday: 'Feiertag'
         }
         return labels[type as keyof typeof labels] || type
-    }
-
-    const getTypeColor = (type: string) => {
-        const colors = {
-            work: 'text-white',
-            vacation: 'text-blue-400',
-            sick: 'text-orange-400',
-            holiday: 'text-purple-400'
-        }
-        return colors[type as keyof typeof colors] || 'text-white'
     }
 
     const previousMonth = () => {
@@ -201,132 +228,183 @@ export default function CalendarPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-white mb-2">Kalender</h1>
-                        <p className="text-secondary">Zeiterfassung und Übersicht</p>
+                        <h1 className="text-3xl font-bold text-white mb-2">Zeiterfassung</h1>
+                        <p className="text-secondary">Tägliche Arbeitszeitübersicht</p>
                     </div>
+                </div>
 
+                {/* Controls */}
+                <div className="bg-surface border border-slate-700 rounded-xl p-4 flex items-center justify-between gap-4">
                     {/* Employee Selector */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        <div
+                            className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md"
+                            style={{ backgroundColor: selectedEmployee?.color || '#3b82f6' }}
+                        >
+                            {selectedEmployee ? `${selectedEmployee.firstName[0]}${selectedEmployee.lastName[0]}` : '?'}
+                        </div>
                         <select
                             value={selectedEmployee?.id || ''}
                             onChange={(e) => {
                                 const emp = employees.find(emp => emp.id === e.target.value)
                                 setSelectedEmployee(emp || null)
                             }}
-                            className="bg-surface border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
                         >
                             {employees.map(emp => (
                                 <option key={emp.id} value={emp.id}>
-                                    {emp.firstName} {emp.lastName} ({emp.employeeId})
+                                    {emp.firstName} {emp.lastName}
                                 </option>
                             ))}
                         </select>
                     </div>
-                </div>
 
-                {/* Month Navigation */}
-                <div className="bg-surface border border-slate-700 rounded-xl p-4 flex items-center justify-between">
-                    <button
-                        onClick={previousMonth}
-                        className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
-                    >
-                        <ChevronLeft className="text-white" size={20} />
-                    </button>
+                    {/* Month Navigation */}
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={previousMonth}
+                            className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+                        >
+                            <ChevronLeft className="text-white" size={20} />
+                        </button>
 
-                    <h2 className="text-xl font-semibold text-white capitalize">{monthName}</h2>
+                        <h2 className="text-lg font-semibold text-white capitalize min-w-[200px] text-center">
+                            {monthName}
+                        </h2>
 
-                    <button
-                        onClick={nextMonth}
-                        className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
-                    >
-                        <ChevronRight className="text-white" size={20} />
-                    </button>
-                </div>
-
-                {/* Calendar Grid */}
-                <div className="bg-surface border border-slate-700 rounded-xl p-6">
-                    {/* Weekday Headers */}
-                    <div className="grid grid-cols-7 gap-2 mb-4">
-                        {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(day => (
-                            <div key={day} className="text-center text-sm font-semibold text-slate-400 py-2">
-                                {day}
-                            </div>
-                        ))}
+                        <button
+                            onClick={nextMonth}
+                            className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+                        >
+                            <ChevronRight className="text-white" size={20} />
+                        </button>
                     </div>
 
-                    {/* Calendar Days */}
-                    <div className="grid grid-cols-7 gap-2">
-                        {getDaysInMonth().map((date, index) => (
-                            <div
-                                key={index}
-                                className={`min-h-[100px] border rounded-lg p-2 transition-all ${date
-                                        ? `${getDayColor(date)} cursor-pointer hover:border-primary`
-                                        : 'bg-slate-900/20 border-slate-800'
-                                    }`}
-                                onClick={() => date && openAddModal(date)}
-                            >
-                                {date && (
-                                    <>
-                                        <div className="text-sm font-medium text-white mb-1">
-                                            {date.getDate()}
-                                        </div>
-                                        {(() => {
-                                            const entry = getEntryForDate(date)
-                                            if (entry) {
-                                                return (
-                                                    <div className="space-y-1">
-                                                        <div className={`text-xs font-medium ${getTypeColor(entry.type)}`}>
-                                                            {getTypeLabel(entry.type)}
-                                                        </div>
-                                                        {entry.hours && (
-                                                            <div className="text-xs text-slate-300 flex items-center gap-1">
-                                                                <Clock size={10} />
-                                                                {entry.hours}h
-                                                            </div>
+                    <div className="w-[200px]"></div> {/* Spacer for alignment */}
+                </div>
+
+                {/* Time Entry Table */}
+                <div className="bg-surface border border-slate-700 rounded-xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr className="bg-slate-800/50 border-b border-slate-700">
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Tag</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Stunden gearbeitet</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Pausen</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Überstunden / Defizit</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700">
+                                {loading ? (
+                                    <tr>
+                                        <td colSpan={6} className="px-6 py-8 text-center text-slate-400">Laden...</td>
+                                    </tr>
+                                ) : (
+                                    getDaysInMonth().map((date) => {
+                                        const entry = getEntryForDate(date)
+                                        const deficit = calculateDailyDeficit(date)
+                                        const dayOfWeek = date.getDay()
+                                        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+
+                                        return (
+                                            <tr
+                                                key={date.toISOString()}
+                                                className={`hover:bg-slate-800/30 transition-colors ${isWeekend ? 'bg-slate-900/30' : ''}`}
+                                            >
+                                                <td className="px-6 py-4">
+                                                    <div>
+                                                        <p className="font-medium text-white">
+                                                            {date.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                                        </p>
+                                                        {isWeekend && (
+                                                            <span className="text-xs text-slate-500">Wochenende</span>
                                                         )}
                                                     </div>
-                                                )
-                                            }
-                                            return null
-                                        })()}
-                                    </>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {entry ? (
+                                                        <div>
+                                                            <p className="text-white font-medium">
+                                                                {entry.type === 'work' ? `${entry.hours || 0}h` : getTypeLabel(entry.type)}
+                                                            </p>
+                                                            {entry.note && (
+                                                                <p className="text-xs text-slate-400 mt-1">{entry.note}</p>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-slate-500">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className="text-slate-500">—</span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {!isWeekend && (
+                                                        <span className={`font-medium ${getStatusColor(deficit)}`}>
+                                                            {deficit > 0 ? '+' : ''}{deficit.toFixed(1)}h
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {!isWeekend && (
+                                                        <span className={getStatusColor(deficit)}>
+                                                            {getStatusText(deficit)}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center gap-2">
+                                                        {entry ? (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => openEditModal(entry)}
+                                                                    className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-700/50 rounded transition-colors"
+                                                                    title="Bearbeiten"
+                                                                >
+                                                                    <Edit2 size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDelete(entry.id)}
+                                                                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700/50 rounded transition-colors"
+                                                                    title="Löschen"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => openAddModal(date)}
+                                                                className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-700/50 rounded transition-colors"
+                                                                title="Eintrag hinzufügen"
+                                                            >
+                                                                <Plus size={14} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })
                                 )}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Legend */}
-                <div className="bg-surface border border-slate-700 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-white mb-3">Legende</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded bg-red-500/20 border border-red-500/30"></div>
-                            <span className="text-xs text-slate-300">Unter Soll</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded bg-slate-700/50 border border-slate-600"></div>
-                            <span className="text-xs text-slate-300">Soll erreicht</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded bg-green-500/20 border border-green-500/30"></div>
-                            <span className="text-xs text-slate-300">Über Soll</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded bg-blue-500/20 border border-blue-500/30"></div>
-                            <span className="text-xs text-slate-300">Urlaub/Krank/Feiertag</span>
-                        </div>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
-            {/* Add Entry Modal */}
+            {/* Add/Edit Entry Modal */}
             <Modal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
-                title={`Eintrag hinzufügen - ${selectedDate?.toLocaleDateString('de-DE')}`}
+                onClose={() => {
+                    setIsModalOpen(false)
+                    setEditingEntry(null)
+                }}
+                title={`${editingEntry ? 'Eintrag bearbeiten' : 'Eintrag hinzufügen'} - ${selectedDate?.toLocaleDateString('de-DE')}`}
             >
-                <form onSubmit={handleAddEntry} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1.5">Typ</label>
                         <select
@@ -369,7 +447,10 @@ export default function CalendarPage() {
                     <div className="pt-4 flex justify-end gap-3">
                         <button
                             type="button"
-                            onClick={() => setIsModalOpen(false)}
+                            onClick={() => {
+                                setIsModalOpen(false)
+                                setEditingEntry(null)
+                            }}
                             className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
                         >
                             Abbrechen
@@ -378,7 +459,7 @@ export default function CalendarPage() {
                             type="submit"
                             className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
                         >
-                            Eintrag hinzufügen
+                            {editingEntry ? 'Aktualisieren' : 'Hinzufügen'}
                         </button>
                     </div>
                 </form>
