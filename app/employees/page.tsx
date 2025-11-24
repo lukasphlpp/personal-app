@@ -1,15 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Search, Mail, Clock, Calendar as CalendarIcon, TrendingUp, TrendingDown } from 'lucide-react'
+import { Plus, Search, Mail, Clock, Calendar as CalendarIcon, TrendingUp, TrendingDown, Edit2 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import Modal from '@/components/Modal'
 
 interface Employee {
     id: string
+    employeeId: string
     firstName: string
     lastName: string
-    email: string
+    email: string | null
     role: string
     weeklyHours: number
     overtimeBalance: number
@@ -22,13 +23,14 @@ export default function EmployeesPage() {
     const [loading, setLoading] = useState(true)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
+    const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
 
     // Form State
     const [formData, setFormData] = useState({
+        employeeId: '',
         firstName: '',
         lastName: '',
         email: '',
-        password: '',
         role: 'EMPLOYEE',
         weeklyHours: 40,
         startDate: new Date().toISOString().split('T')[0]
@@ -38,6 +40,21 @@ export default function EmployeesPage() {
     useEffect(() => {
         fetchEmployees()
     }, [])
+
+    useEffect(() => {
+        if (editingEmployee) {
+            setFormData({
+                employeeId: editingEmployee.employeeId,
+                firstName: editingEmployee.firstName,
+                lastName: editingEmployee.lastName,
+                email: editingEmployee.email || '',
+                role: editingEmployee.role,
+                weeklyHours: editingEmployee.weeklyHours,
+                startDate: new Date(editingEmployee.startDate).toISOString().split('T')[0]
+            })
+            setIsModalOpen(true)
+        }
+    }, [editingEmployee])
 
     const fetchEmployees = async () => {
         try {
@@ -55,39 +72,61 @@ export default function EmployeesPage() {
         e.preventDefault()
         setSubmitting(true)
         try {
-            const res = await fetch('/api/employees', {
-                method: 'POST',
+            const url = '/api/employees'
+            const method = editingEmployee ? 'PATCH' : 'POST'
+            const body = editingEmployee
+                ? { ...formData, id: editingEmployee.id }
+                : formData
+
+            const res = await fetch(url, {
+                method,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
+                body: JSON.stringify(body)
             })
 
             if (res.ok) {
                 setIsModalOpen(false)
+                setEditingEmployee(null)
                 fetchEmployees()
-                setFormData({
-                    firstName: '',
-                    lastName: '',
-                    email: '',
-                    password: '',
-                    role: 'EMPLOYEE',
-                    weeklyHours: 40,
-                    startDate: new Date().toISOString().split('T')[0]
-                })
+                resetForm()
+            } else {
+                const data = await res.json()
+                alert(data.error || 'Fehler beim Speichern')
             }
         } catch (error) {
-            console.error('Failed to create employee', error)
+            console.error('Failed to save employee', error)
+            alert('Fehler beim Speichern')
         } finally {
             setSubmitting(false)
         }
     }
 
+    const resetForm = () => {
+        setFormData({
+            employeeId: '',
+            firstName: '',
+            lastName: '',
+            email: '',
+            role: 'EMPLOYEE',
+            weeklyHours: 40,
+            startDate: new Date().toISOString().split('T')[0]
+        })
+    }
+
+    const handleCloseModal = () => {
+        setIsModalOpen(false)
+        setEditingEmployee(null)
+        resetForm()
+    }
+
     const filteredEmployees = employees.filter(emp =>
         emp.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         emp.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        emp.email.toLowerCase().includes(searchTerm.toLowerCase())
+        emp.employeeId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (emp.email && emp.email.toLowerCase().includes(searchTerm.toLowerCase()))
     )
 
-    // Helper function for overtime balance color
+    // Helper functions
     const getOvertimeColor = (balance: number) => {
         if (balance < 0) return 'text-red-400'
         if (balance === 0) return 'text-slate-400'
@@ -124,7 +163,7 @@ export default function EmployeesPage() {
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                         <input
                             type="text"
-                            placeholder="Suchen nach Name oder Email..."
+                            placeholder="Suchen nach Name, Email oder Personalnummer..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -138,26 +177,30 @@ export default function EmployeesPage() {
                         <table className="w-full text-left">
                             <thead>
                                 <tr className="bg-slate-800/50 border-b border-slate-700">
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Personalnr.</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Mitarbeiter</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Rolle</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Soll-Stunden/Woche</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Soll-Std/Woche</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Arbeitsstundenkonto</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Startdatum</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Aktionen</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-700">
                                 {loading ? (
                                     <tr>
-                                        <td colSpan={6} className="px-6 py-8 text-center text-slate-400">Laden...</td>
+                                        <td colSpan={7} className="px-6 py-8 text-center text-slate-400">Laden...</td>
                                     </tr>
                                 ) : filteredEmployees.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="px-6 py-8 text-center text-slate-400">Keine Mitarbeiter gefunden</td>
+                                        <td colSpan={7} className="px-6 py-8 text-center text-slate-400">Keine Mitarbeiter gefunden</td>
                                     </tr>
                                 ) : (
                                     filteredEmployees.map((employee) => (
                                         <tr key={employee.id} className="hover:bg-slate-800/30 transition-colors">
+                                            <td className="px-6 py-4">
+                                                <span className="font-mono text-sm text-slate-300">{employee.employeeId}</span>
+                                            </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-3">
                                                     <div
@@ -168,10 +211,12 @@ export default function EmployeesPage() {
                                                     </div>
                                                     <div>
                                                         <p className="font-medium text-white">{employee.firstName} {employee.lastName}</p>
-                                                        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                                                            <Mail size={12} />
-                                                            {employee.email}
-                                                        </div>
+                                                        {employee.email && (
+                                                            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                                                                <Mail size={12} />
+                                                                {employee.email}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </td>
@@ -204,10 +249,10 @@ export default function EmployeesPage() {
                                                         </span>
                                                     </span>
                                                     {employee.overtimeBalance <= -18 && (
-                                                        <span className="text-xs text-red-400">⚠️ Limit</span>
+                                                        <span className="text-xs text-red-400">⚠️</span>
                                                     )}
                                                     {employee.overtimeBalance >= 38 && (
-                                                        <span className="text-xs text-amber-400">⚠️ Limit</span>
+                                                        <span className="text-xs text-amber-400">⚠️</span>
                                                     )}
                                                 </div>
                                             </td>
@@ -218,10 +263,13 @@ export default function EmployeesPage() {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
-                                                    <span className="text-sm text-slate-300">Aktiv</span>
-                                                </div>
+                                                <button
+                                                    onClick={() => setEditingEmployee(employee)}
+                                                    className="p-2 text-slate-400 hover:text-primary hover:bg-slate-700/50 rounded-lg transition-colors"
+                                                    title="Bearbeiten"
+                                                >
+                                                    <Edit2 size={16} />
+                                                </button>
                                             </td>
                                         </tr>
                                     ))
@@ -232,16 +280,32 @@ export default function EmployeesPage() {
                 </div>
             </div>
 
-            {/* Add Employee Modal */}
+            {/* Add/Edit Employee Modal */}
             <Modal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
-                title="Neuen Mitarbeiter anlegen"
+                onClose={handleCloseModal}
+                title={editingEmployee ? 'Mitarbeiter bearbeiten' : 'Neuen Mitarbeiter anlegen'}
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                            Personalnummer <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            required
+                            value={formData.employeeId}
+                            onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                            placeholder="z.B. MA001"
+                        />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Vorname</label>
+                            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                                Vorname <span className="text-red-400">*</span>
+                            </label>
                             <input
                                 type="text"
                                 required
@@ -251,7 +315,9 @@ export default function EmployeesPage() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Nachname</label>
+                            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                                Nachname <span className="text-red-400">*</span>
+                            </label>
                             <input
                                 type="text"
                                 required
@@ -263,24 +329,15 @@ export default function EmployeesPage() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1.5">Email</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                            Email <span className="text-slate-500 text-xs">(optional, nur für Login)</span>
+                        </label>
                         <input
                             type="email"
-                            required
                             value={formData.email}
                             onChange={e => setFormData({ ...formData, email: e.target.value })}
                             className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1.5">Passwort</label>
-                        <input
-                            type="password"
-                            required
-                            value={formData.password}
-                            onChange={e => setFormData({ ...formData, password: e.target.value })}
-                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="optional"
                         />
                     </div>
 
@@ -324,7 +381,7 @@ export default function EmployeesPage() {
                     <div className="pt-4 flex justify-end gap-3">
                         <button
                             type="button"
-                            onClick={() => setIsModalOpen(false)}
+                            onClick={handleCloseModal}
                             className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
                         >
                             Abbrechen
@@ -334,7 +391,7 @@ export default function EmployeesPage() {
                             disabled={submitting}
                             className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20 disabled:opacity-50"
                         >
-                            {submitting ? 'Speichern...' : 'Mitarbeiter anlegen'}
+                            {submitting ? 'Speichern...' : editingEmployee ? 'Aktualisieren' : 'Mitarbeiter anlegen'}
                         </button>
                     </div>
                 </form>

@@ -12,8 +12,9 @@ datasource db {
 
 model User {
   id              String    @id @default(cuid())
-  email           String    @unique
-  password        String
+  employeeId      String    @unique // Personalnummer
+  email           String?   @unique // Optional: nur für Login-Accounts
+  password        String?   // Optional: nur für Login-Accounts
   firstName       String
   lastName        String
   role            Role      @default(EMPLOYEE)
