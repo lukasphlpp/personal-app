@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { UserPlus, Mail, Lock, User, Building, AlertCircle, CheckCircle } from 'lucide-react'
+import { UserPlus, Mail, Lock, User, AlertCircle, CheckCircle } from 'lucide-react'
 
 export default function RegisterPage() {
     const router = useRouter()
@@ -12,7 +12,6 @@ export default function RegisterPage() {
         confirmPassword: '',
         firstName: '',
         lastName: '',
-        department: '',
     })
     const [error, setError] = useState('')
     const [success, setSuccess] = useState(false)
@@ -150,23 +149,6 @@ export default function RegisterPage() {
                                     className="w-full pl-10 pr-4 py-3 bg-slate-900/50 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                                     placeholder="max@example.com"
                                     required
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">
-                                Abteilung
-                            </label>
-                            <div className="relative">
-                                <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                                <input
-                                    type="text"
-                                    name="department"
-                                    value={formData.department}
-                                    onChange={handleChange}
-                                    className="w-full pl-10 pr-4 py-3 bg-slate-900/50 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                                    placeholder="Entwicklung"
                                 />
                             </div>
                         </div>

@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 
 export async function POST(request: Request) {
     try {
-        const { email, password, firstName, lastName, department } = await request.json()
+        const { email, password, firstName, lastName } = await request.json()
 
         // Validation
         if (!email || !password || !firstName || !lastName) {
@@ -36,8 +36,9 @@ export async function POST(request: Request) {
                 password: hashedPassword,
                 firstName,
                 lastName,
-                department: department || null,
                 role: 'EMPLOYEE', // Default role
+                weeklyHours: 40, // Default 40h/week
+                overtimeBalance: 0,
                 color: `#${Math.floor(Math.random() * 16777215).toString(16)}`, // Random color
             }
         })
