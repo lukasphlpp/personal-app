@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Trash2, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Trash2, AlertTriangle, Clock, Calendar as CalendarIcon, TrendingUp } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 
 interface Employee {
@@ -10,6 +10,7 @@ interface Employee {
     firstName: string
     lastName: string
     weeklyHours: number
+    overtimeBalance: number
     color: string
 }
 
@@ -22,7 +23,8 @@ interface TimeEntry {
     id: string
     userId: string
     date: string
-    type: 'work' | 'vacation' | 'sick' | 'holiday'
+    type: 'work' | 'vacation' | 'sick' | 'holiday' | 'overtime_reduction'
+    halfDay: string | null
     timeSlots: TimeSlot[] | null
     breakMinutes: number | null
     hours: number | null
@@ -39,7 +41,8 @@ export default function CalendarPage() {
 
     // Form state for expanded day
     const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([{ startTime: '08:00', endTime: '12:00' }])
-    const [entryType, setEntryType] = useState<'work' | 'vacation' | 'sick' | 'holiday'>('work')
+    const [entryType, setEntryType] = useState<'work' | 'vacation' | 'sick' | 'holiday' | 'overtime_reduction'>('work')
+    const [halfDay, setHalfDay] = useState<string | null>(null)
     const [note, setNote] = useState('')
 
     useEffect(() => {
@@ -94,8 +97,8 @@ export default function CalendarPage() {
         } else {
             const entry = timeEntries.find(e => new Date(e.date).toDateString() === dateStr)
             if (entry) {
-                // Load existing entry
                 setEntryType(entry.type)
+                setHalfDay(entry.halfDay)
                 setNote(entry.note || '')
                 if (entry.timeSlots && entry.timeSlots.length > 0) {
                     setTimeSlots(entry.timeSlots)
@@ -112,15 +115,17 @@ export default function CalendarPage() {
     const resetForm = () => {
         setTimeSlots([{ startTime: '08:00', endTime: '12:00' }])
         setEntryType('work')
+        setHalfDay(null)
         setNote('')
     }
 
     const addTimeSlot = () => {
-        const lastSlot = sortedTimeSlots()[sortedTimeSlots().length - 1]
+        const sorted = sortedTimeSlots()
+        const lastSlot = sorted[sorted.length - 1]
         const [endH, endM] = lastSlot.endTime.split(':').map(Number)
         const newStartH = endH + 1
-        const newStart = `${String(newStartH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
-        const newEnd = `${String(newStartH + 4).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+        const newStart = `${String(Math.min(newStartH, 23)).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+        const newEnd = `${String(Math.min(newStartH + 4, 23)).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
 
         setTimeSlots([...timeSlots, { startTime: newStart, endTime: newEnd }])
     }
@@ -144,15 +149,12 @@ export default function CalendarPage() {
         return h * 60 + m
     }
 
-    const minutesToTime = (minutes: number) => {
-        const h = Math.floor(minutes / 60)
-        const m = minutes % 60
-        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    }
-
     const calculateTotalHours = () => {
         let totalMinutes = 0
         timeSlots.forEach(slot => {
+            if (!slot.startTime || !slot.endTime || slot.startTime.includes('-') || slot.endTime.includes('-')) {
+                return // Skip invalid slots
+            }
             const startMinutes = timeToMinutes(slot.startTime)
             const endMinutes = timeToMinutes(slot.endTime)
             totalMinutes += endMinutes - startMinutes
@@ -163,7 +165,7 @@ export default function CalendarPage() {
     const calculateBreakMinutes = () => {
         if (timeSlots.length < 2) return 0
 
-        const sorted = sortedTimeSlots()
+        const sorted = sortedTimeSlots().filter(s => s.startTime && s.endTime && !s.startTime.includes('-') && !s.endTime.includes('-'))
         let breakMinutes = 0
 
         for (let i = 0; i < sorted.length - 1; i++) {
@@ -182,6 +184,7 @@ export default function CalendarPage() {
         const breaks: { afterIndex: number, minutes: number }[] = []
 
         for (let i = 0; i < sorted.length - 1; i++) {
+            if (!sorted[i].endTime || !sorted[i + 1].startTime) continue
             const endMinutes = timeToMinutes(sorted[i].endTime)
             const startMinutes = timeToMinutes(sorted[i + 1].startTime)
             breaks.push({ afterIndex: i, minutes: startMinutes - endMinutes })
@@ -200,22 +203,32 @@ export default function CalendarPage() {
         return { compliant: true, required: 0, message: '' }
     }
 
+    const validateTimeSlots = () => {
+        for (const slot of timeSlots) {
+            if (!slot.startTime || !slot.endTime || slot.startTime.includes('-') || slot.endTime.includes('-')) {
+                return { valid: false, message: 'Bitte alle Zeitfelder ausfüllen' }
+            }
+        }
+        return { valid: true, message: '' }
+    }
+
     const saveEntry = async () => {
         if (!selectedEmployee || !expandedDay) return
 
-        const totalHours = calculateTotalHours()
-        const breakMinutes = calculateBreakMinutes()
-        const breakCheck = checkBreakCompliance(totalHours, breakMinutes)
-
-        if (!breakCheck.compliant) {
-            if (!confirm(`${breakCheck.message}. Trotzdem speichern?`)) {
+        if (entryType === 'work') {
+            const validation = validateTimeSlots()
+            if (!validation.valid) {
+                alert(validation.message)
                 return
             }
-        }
 
-        if (breakMinutes < 0) {
-            alert('Zeiträume überschneiden sich! Bitte korrigieren.')
-            return
+            const totalHours = calculateTotalHours()
+            const breakMinutes = calculateBreakMinutes()
+
+            if (breakMinutes < 0) {
+                alert('Zeiträume überschneiden sich! Bitte korrigieren.')
+                return
+            }
         }
 
         const existingEntry = timeEntries.find(e => new Date(e.date).toDateString() === expandedDay)
@@ -224,11 +237,15 @@ export default function CalendarPage() {
             const url = '/api/time-entries'
             const method = existingEntry ? 'PATCH' : 'POST'
 
+            const totalHours = entryType === 'work' ? calculateTotalHours() : null
+            const breakMinutes = entryType === 'work' ? calculateBreakMinutes() : null
+
             const body = entryType === 'work' ? {
                 ...(existingEntry && { id: existingEntry.id }),
                 userId: selectedEmployee.id,
                 date: new Date(expandedDay).toISOString(),
                 type: entryType,
+                halfDay: null,
                 timeSlots: sortedTimeSlots(),
                 breakMinutes,
                 hours: totalHours,
@@ -238,6 +255,10 @@ export default function CalendarPage() {
                 userId: selectedEmployee.id,
                 date: new Date(expandedDay).toISOString(),
                 type: entryType,
+                halfDay,
+                timeSlots: null,
+                breakMinutes: null,
+                hours: null,
                 note
             }
 
@@ -312,7 +333,11 @@ export default function CalendarPage() {
 
         if (!entry) return -dailyTarget
 
-        if (entry.type !== 'work') return 0
+        if (entry.type !== 'work') {
+            // Vacation/sick/holiday count as target (or half if halfDay)
+            const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
+            return hoursWorked - dailyTarget
+        }
 
         return (entry.hours || 0) - dailyTarget
     }
@@ -323,26 +348,47 @@ export default function CalendarPage() {
         return 'text-green-400'
     }
 
-    const getStatusText = (date: Date, entry: TimeEntry | undefined) => {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const checkDate = new Date(date)
-        checkDate.setHours(0, 0, 0, 0)
+    const getStatusBadge = (date: Date, entry: TimeEntry | undefined) => {
+        if (!entry) return null
 
-        const dayOfWeek = date.getDay()
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+        const badges: { text: string, color: string, tooltip?: string }[] = []
 
-        if (isWeekend) return ''
-        if (checkDate > today) return ''
-
-        if (!entry) {
-            return '⚠ Eintrag fehlt'
+        // Entry type badges
+        if (entry.type === 'vacation') {
+            badges.push({
+                text: entry.halfDay === 'morning' ? '🏖️ Urlaub (VM)' : entry.halfDay === 'afternoon' ? '🏖️ Urlaub (NM)' : '🏖️ Urlaub',
+                color: 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+            })
+        } else if (entry.type === 'sick') {
+            badges.push({
+                text: entry.halfDay === 'morning' ? '🤒 Krank (VM)' : entry.halfDay === 'afternoon' ? '🤒 Krank (NM)' : '🤒 Krank',
+                color: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+            })
+        } else if (entry.type === 'holiday') {
+            badges.push({
+                text: '🎉 Feiertag',
+                color: 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+            })
+        } else if (entry.type === 'overtime_reduction') {
+            badges.push({
+                text: entry.halfDay === 'morning' ? '⏰ Überstunden abbau (VM)' : entry.halfDay === 'afternoon' ? '⏰ Überstunden abbau (NM)' : '⏰ Überstunden abbau',
+                color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+            })
         }
 
-        const deficit = calculateDailyDeficit(date)
-        if (deficit < 0) return '⚠ Pending'
-        if (deficit === 0) return '✓ OK'
-        return '✓ Überstunden'
+        // Break compliance check for work entries
+        if (entry.type === 'work' && entry.hours && entry.breakMinutes !== null) {
+            const check = checkBreakCompliance(entry.hours, entry.breakMinutes)
+            if (!check.compliant) {
+                badges.push({
+                    text: '⚠️ Pausenpflicht',
+                    color: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+                    tooltip: check.message
+                })
+            }
+        }
+
+        return badges
     }
 
     const getTypeLabel = (type: string) => {
@@ -350,10 +396,54 @@ export default function CalendarPage() {
             work: 'Arbeit',
             vacation: 'Urlaub',
             sick: 'Krank',
-            holiday: 'Feiertag'
+            holiday: 'Feiertag',
+            overtime_reduction: 'Überstunden abbau'
         }
         return labels[type as keyof typeof labels] || type
     }
+
+    // Monthly summary calculations
+    const calculateMonthlySummary = () => {
+        if (!selectedEmployee) return null
+
+        const days = getDaysInMonth()
+        const workDays = days.filter(d => {
+            const dow = d.getDay()
+            return dow !== 0 && dow !== 6
+        })
+
+        let totalWorked = 0
+        let totalExpected = workDays.length * (selectedEmployee.weeklyHours / 5)
+        let totalBreak = 0
+        let daysWithEntries = 0
+
+        workDays.forEach(day => {
+            const entry = getEntryForDate(day)
+            if (entry) {
+                daysWithEntries++
+                if (entry.type === 'work' && entry.hours) {
+                    totalWorked += entry.hours
+                    totalBreak += entry.breakMinutes || 0
+                } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday' || entry.type === 'overtime_reduction') {
+                    const hours = entry.halfDay ? (selectedEmployee.weeklyHours / 5) / 2 : (selectedEmployee.weeklyHours / 5)
+                    totalWorked += hours
+                }
+            }
+        })
+
+        const deficit = totalWorked - totalExpected
+
+        return {
+            totalWorked,
+            totalExpected,
+            totalBreak,
+            deficit,
+            workDays: workDays.length,
+            daysWithEntries
+        }
+    }
+
+    const summary = calculateMonthlySummary()
 
     const previousMonth = () => {
         setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))
@@ -423,6 +513,41 @@ export default function CalendarPage() {
                     <div className="w-[200px]"></div>
                 </div>
 
+                {/* Monthly Summary */}
+                {summary && (
+                    <div className="bg-surface border border-slate-700 rounded-xl p-6">
+                        <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Monatsübersicht</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Arbeitsstunden</p>
+                                <p className="text-2xl font-bold text-white">{summary.totalWorked.toFixed(1)}h</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Soll-Stunden</p>
+                                <p className="text-2xl font-bold text-slate-300">{summary.totalExpected.toFixed(1)}h</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Verbleibend</p>
+                                <p className="text-2xl font-bold text-slate-300">{(summary.totalExpected - summary.totalWorked).toFixed(1)}h</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Überstunden / Defizit</p>
+                                <p className={`text-2xl font-bold ${summary.deficit > 0 ? 'text-green-400' : summary.deficit < 0 ? 'text-red-400' : 'text-slate-300'}`}>
+                                    {summary.deficit > 0 ? '+' : ''}{summary.deficit.toFixed(1)}h
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Arbeitstage</p>
+                                <p className="text-2xl font-bold text-white">{summary.daysWithEntries} / {summary.workDays}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Gesamtpausen</p>
+                                <p className="text-2xl font-bold text-white">{summary.totalBreak} Min.</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="bg-surface border border-slate-700 rounded-xl overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
@@ -454,6 +579,7 @@ export default function CalendarPage() {
                                         const checkDate = new Date(date)
                                         checkDate.setHours(0, 0, 0, 0)
                                         const isFuture = checkDate > today
+                                        const statusBadges = getStatusBadge(date, entry)
 
                                         return (
                                             <React.Fragment key={dateStr}>
@@ -511,16 +637,26 @@ export default function CalendarPage() {
                                                         )}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        {!isWeekend && !isFuture && (
+                                                        {!isWeekend && !isFuture && entry && (
                                                             <span className={`font-medium ${getStatusColor(deficit)}`}>
                                                                 {deficit > 0 ? '+' : ''}{deficit.toFixed(1)}h
                                                             </span>
                                                         )}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <span className={getStatusColor(deficit)}>
-                                                            {getStatusText(date, entry)}
-                                                        </span>
+                                                        {statusBadges && statusBadges.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {statusBadges.map((badge, i) => (
+                                                                    <span
+                                                                        key={i}
+                                                                        className={`text-xs px-2 py-1 rounded border ${badge.color}`}
+                                                                        title={badge.tooltip}
+                                                                    >
+                                                                        {badge.text}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 </tr>
 
@@ -557,8 +693,24 @@ export default function CalendarPage() {
                                                                         <option value="vacation">Urlaub</option>
                                                                         <option value="sick">Krank</option>
                                                                         <option value="holiday">Feiertag</option>
+                                                                        <option value="overtime_reduction">Überstunden abbau</option>
                                                                     </select>
                                                                 </div>
+
+                                                                {entryType !== 'work' && (
+                                                                    <div>
+                                                                        <label className="block text-sm font-medium text-slate-300 mb-2">Zeitraum</label>
+                                                                        <select
+                                                                            value={halfDay || 'full'}
+                                                                            onChange={(e) => setHalfDay(e.target.value === 'full' ? null : e.target.value)}
+                                                                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                        >
+                                                                            <option value="full">Ganztags</option>
+                                                                            <option value="morning">Vormittag</option>
+                                                                            <option value="afternoon">Nachmittag</option>
+                                                                        </select>
+                                                                    </div>
+                                                                )}
 
                                                                 {entryType === 'work' && (
                                                                     <>

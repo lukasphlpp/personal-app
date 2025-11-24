@@ -257,11 +257,11 @@ export default function EmployeesPage() {
                                                             {employee.overtimeBalance > 0 ? '+' : ''}{employee.overtimeBalance.toFixed(1)}h
                                                         </span>
                                                     </span>
-                                                    {employee.overtimeBalance <= -18 && (
-                                                        <span className="text-xs text-red-400">⚠️</span>
+                                                    {employee.overtimeBalance <= -20 && (
+                                                        <span className="text-xs text-red-400" title="Kritisches Minusstunden-Limit erreicht">⚠️</span>
                                                     )}
-                                                    {employee.overtimeBalance >= 38 && (
-                                                        <span className="text-xs text-amber-400">⚠️</span>
+                                                    {employee.overtimeBalance >= 40 && (
+                                                        <span className="text-xs text-amber-400" title="Kritisches Überstunden-Limit erreicht">⚠️</span>
                                                     )}
                                                 </div>
                                             </td>
