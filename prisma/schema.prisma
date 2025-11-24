@@ -11,20 +11,23 @@ datasource db {
 }
 
 model User {
-  id              String    @id @default(cuid())
-  employeeId      String    @unique // Personalnummer
-  email           String?   @unique // Optional: nur für Login-Accounts
-  password        String?   // Optional: nur für Login-Accounts
+  id              String        @id @default(cuid())
+  employeeId      String        @unique
+  email           String?       @unique
+  password        String?
   firstName       String
   lastName        String
-  role            Role      @default(EMPLOYEE)
-  weeklyHours     Float     @default(40) // Soll-Stunden pro Woche
-  hourlyRate      Float     @default(15) // Stundensatz in €
-  overtimeBalance Float     @default(0)  // Aktueller Überstunden-Stand
-  color           String    @default("#3b82f6")
-  startDate       DateTime  @default(now())
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  role            Role          @default(EMPLOYEE)
+  weeklyHours     Float         @default(40)
+  hourlyRate      Float         @default(15)
+  overtimeBalance Float         @default(0)
+  vacationDays    Int           @default(30)
+  vacationDaysUsed Float        @default(0)
+  defaultSchedule Json?
+  color           String
+  startDate       DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
   
   timeEntries     TimeEntry[]
   
@@ -36,10 +39,10 @@ model TimeEntry {
   userId      String
   date        DateTime
   type        EntryType
-  halfDay     String?       // "morning" | "afternoon" | null (full day)
-  timeSlots   Json?         // Array of {startTime: "HH:MM", endTime: "HH:MM"}
-  breakMinutes Int?         // Berechnete Pausenzeit in Minuten
-  hours       Float?        // Berechnete Arbeitsstunden
+  halfDay     String?
+  timeSlots   Json?
+  breakMinutes Int?
+  hours       Float?
   note        String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
