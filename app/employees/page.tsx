@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Search, Mail, Building, Calendar as CalendarIcon, User } from 'lucide-react'
+import { Plus, Search, Mail, Clock, Calendar as CalendarIcon, TrendingUp, TrendingDown } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import Modal from '@/components/Modal'
 
@@ -11,7 +11,8 @@ interface Employee {
     lastName: string
     email: string
     role: string
-    department: string | null
+    weeklyHours: number
+    overtimeBalance: number
     color: string
     startDate: string
 }
@@ -29,7 +30,7 @@ export default function EmployeesPage() {
         email: '',
         password: '',
         role: 'EMPLOYEE',
-        department: '',
+        weeklyHours: 40,
         startDate: new Date().toISOString().split('T')[0]
     })
     const [submitting, setSubmitting] = useState(false)
@@ -69,7 +70,7 @@ export default function EmployeesPage() {
                     email: '',
                     password: '',
                     role: 'EMPLOYEE',
-                    department: '',
+                    weeklyHours: 40,
                     startDate: new Date().toISOString().split('T')[0]
                 })
             }
@@ -86,6 +87,19 @@ export default function EmployeesPage() {
         emp.email.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
+    // Helper function for overtime balance color
+    const getOvertimeColor = (balance: number) => {
+        if (balance < 0) return 'text-red-400'
+        if (balance === 0) return 'text-slate-400'
+        return 'text-green-400'
+    }
+
+    const getOvertimeBgColor = (balance: number) => {
+        if (balance < 0) return 'bg-red-500/10 border-red-500/20'
+        if (balance === 0) return 'bg-slate-700/50 border-slate-600'
+        return 'bg-green-500/10 border-green-500/20'
+    }
+
     return (
         <AppLayout>
             <div className="flex flex-col gap-6">
@@ -93,7 +107,7 @@ export default function EmployeesPage() {
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold text-white mb-2">Mitarbeiter</h1>
-                        <p className="text-secondary">Verwalte dein Team und Zugriffsrechte</p>
+                        <p className="text-secondary">Verwalte dein Team und Arbeitszeitkonten</p>
                     </div>
                     <button
                         onClick={() => setIsModalOpen(true)}
@@ -126,7 +140,8 @@ export default function EmployeesPage() {
                                 <tr className="bg-slate-800/50 border-b border-slate-700">
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Mitarbeiter</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Rolle</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Abteilung</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Soll-Stunden/Woche</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Arbeitsstundenkonto</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Startdatum</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
                                 </tr>
@@ -134,11 +149,11 @@ export default function EmployeesPage() {
                             <tbody className="divide-y divide-slate-700">
                                 {loading ? (
                                     <tr>
-                                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">Laden...</td>
+                                        <td colSpan={6} className="px-6 py-8 text-center text-slate-400">Laden...</td>
                                     </tr>
                                 ) : filteredEmployees.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">Keine Mitarbeiter gefunden</td>
+                                        <td colSpan={6} className="px-6 py-8 text-center text-slate-400">Keine Mitarbeiter gefunden</td>
                                     </tr>
                                 ) : (
                                     filteredEmployees.map((employee) => (
@@ -172,8 +187,28 @@ export default function EmployeesPage() {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2 text-sm text-slate-300">
-                                                    <Building size={14} className="text-slate-500" />
-                                                    {employee.department || '-'}
+                                                    <Clock size={14} className="text-slate-500" />
+                                                    {employee.weeklyHours}h
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-medium border ${getOvertimeBgColor(employee.overtimeBalance)}`}>
+                                                        {employee.overtimeBalance < 0 ? (
+                                                            <TrendingDown size={14} className="text-red-400" />
+                                                        ) : employee.overtimeBalance > 0 ? (
+                                                            <TrendingUp size={14} className="text-green-400" />
+                                                        ) : null}
+                                                        <span className={getOvertimeColor(employee.overtimeBalance)}>
+                                                            {employee.overtimeBalance > 0 ? '+' : ''}{employee.overtimeBalance.toFixed(1)}h
+                                                        </span>
+                                                    </span>
+                                                    {employee.overtimeBalance <= -18 && (
+                                                        <span className="text-xs text-red-400">⚠️ Limit</span>
+                                                    )}
+                                                    {employee.overtimeBalance >= 38 && (
+                                                        <span className="text-xs text-amber-400">⚠️ Limit</span>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
@@ -263,11 +298,14 @@ export default function EmployeesPage() {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Abteilung</label>
+                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Soll-Stunden/Woche</label>
                             <input
-                                type="text"
-                                value={formData.department}
-                                onChange={e => setFormData({ ...formData, department: e.target.value })}
+                                type="number"
+                                step="0.5"
+                                min="0"
+                                max="60"
+                                value={formData.weeklyHours}
+                                onChange={e => setFormData({ ...formData, weeklyHours: parseFloat(e.target.value) })}
                                 className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
                             />
                         </div>

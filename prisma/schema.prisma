@@ -11,19 +11,20 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String
-  firstName     String
-  lastName      String
-  role          Role      @default(EMPLOYEE)
-  department    String?
-  color         String    @default("#3b82f6")
-  startDate     DateTime  @default(now())
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  email           String    @unique
+  password        String
+  firstName       String
+  lastName        String
+  role            Role      @default(EMPLOYEE)
+  weeklyHours     Float     @default(40) // Soll-Stunden pro Woche
+  overtimeBalance Float     @default(0)  // Aktueller Überstunden-Stand
+  color           String    @default("#3b82f6")
+  startDate       DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   
-  timeEntries   TimeEntry[]
+  timeEntries     TimeEntry[]
   
   @@map("users")
 }

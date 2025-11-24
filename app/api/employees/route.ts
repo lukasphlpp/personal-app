@@ -18,7 +18,8 @@ export async function GET() {
                 lastName: true,
                 email: true,
                 role: true,
-                department: true,
+                weeklyHours: true,
+                overtimeBalance: true,
                 color: true,
                 startDate: true,
             },
@@ -40,11 +41,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Only Admin/Manager should be able to create users (optional check)
-        // if (session.user.role === 'EMPLOYEE') { ... }
-
         const body = await request.json()
-        const { firstName, lastName, email, password, role, department, color, startDate } = body
+        const { firstName, lastName, email, password, role, weeklyHours, color, startDate } = body
 
         // Check if user exists
         const existingUser = await prisma.user.findUnique({
@@ -64,7 +62,8 @@ export async function POST(request: Request) {
                 email,
                 password: hashedPassword,
                 role: role || 'EMPLOYEE',
-                department,
+                weeklyHours: weeklyHours || 40,
+                overtimeBalance: 0,
                 color: color || '#3b82f6',
                 startDate: startDate ? new Date(startDate) : new Date(),
             }
