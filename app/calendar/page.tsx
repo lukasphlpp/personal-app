@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Trash2, AlertTriangle, Clock, Calendar as CalendarIcon, TrendingUp } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
+import { formatHoursToTime, formatMinutesToTime } from '@/lib/timeUtils'
 
 interface Employee {
     id: string
@@ -11,6 +12,8 @@ interface Employee {
     lastName: string
     weeklyHours: number
     overtimeBalance: number
+    vacationDays: number
+    vacationDaysUsed: number
     color: string
 }
 
@@ -439,7 +442,9 @@ export default function CalendarPage() {
             totalBreak,
             deficit,
             workDays: workDays.length,
-            daysWithEntries
+            daysWithEntries,
+            vacationDays: selectedEmployee.vacationDays,
+            vacationDaysUsed: selectedEmployee.vacationDaysUsed
         }
     }
 
@@ -517,23 +522,23 @@ export default function CalendarPage() {
                 {summary && (
                     <div className="bg-surface border border-slate-700 rounded-xl p-6">
                         <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Monatsübersicht</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
                             <div>
                                 <p className="text-xs text-slate-400 mb-1">Arbeitsstunden</p>
-                                <p className="text-2xl font-bold text-white">{summary.totalWorked.toFixed(1)}h</p>
+                                <p className="text-2xl font-bold text-white">{formatHoursToTime(summary.totalWorked)}</p>
                             </div>
                             <div>
                                 <p className="text-xs text-slate-400 mb-1">Soll-Stunden</p>
-                                <p className="text-2xl font-bold text-slate-300">{summary.totalExpected.toFixed(1)}h</p>
+                                <p className="text-2xl font-bold text-slate-300">{formatHoursToTime(summary.totalExpected)}</p>
                             </div>
                             <div>
                                 <p className="text-xs text-slate-400 mb-1">Verbleibend</p>
-                                <p className="text-2xl font-bold text-slate-300">{(summary.totalExpected - summary.totalWorked).toFixed(1)}h</p>
+                                <p className="text-2xl font-bold text-slate-300">{formatHoursToTime(summary.totalExpected - summary.totalWorked)}</p>
                             </div>
                             <div>
                                 <p className="text-xs text-slate-400 mb-1">Überstunden / Defizit</p>
                                 <p className={`text-2xl font-bold ${summary.deficit > 0 ? 'text-green-400' : summary.deficit < 0 ? 'text-red-400' : 'text-slate-300'}`}>
-                                    {summary.deficit > 0 ? '+' : ''}{summary.deficit.toFixed(1)}h
+                                    {summary.deficit > 0 ? '+' : ''}{formatHoursToTime(summary.deficit)}
                                 </p>
                             </div>
                             <div>
@@ -542,7 +547,11 @@ export default function CalendarPage() {
                             </div>
                             <div>
                                 <p className="text-xs text-slate-400 mb-1">Gesamtpausen</p>
-                                <p className="text-2xl font-bold text-white">{summary.totalBreak} Min.</p>
+                                <p className="text-2xl font-bold text-white">{formatMinutesToTime(summary.totalBreak)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-slate-400 mb-1">Urlaubstage</p>
+                                <p className="text-2xl font-bold text-blue-400">{summary.vacationDaysUsed} / {summary.vacationDays}</p>
                             </div>
                         </div>
                     </div>
@@ -581,11 +590,16 @@ export default function CalendarPage() {
                                         const isFuture = checkDate > today
                                         const statusBadges = getStatusBadge(date, entry)
 
+                                        const rowBackground = entry?.type === 'vacation' ? 'bg-blue-500/10 hover:bg-blue-500/20' :
+                                            entry?.type === 'sick' ? 'bg-orange-500/10 hover:bg-orange-500/20' :
+                                                entry?.type === 'holiday' ? 'bg-purple-500/10 hover:bg-purple-500/20' :
+                                                    entry?.type === 'overtime_reduction' ? 'bg-cyan-500/10 hover:bg-cyan-500/20' :
+                                                        isWeekend ? 'bg-slate-900/30 hover:bg-slate-800/30' : 'hover:bg-slate-800/30'
+
                                         return (
                                             <React.Fragment key={dateStr}>
                                                 <tr
-                                                    className={`hover:bg-slate-800/30 transition-colors cursor-pointer ${isWeekend ? 'bg-slate-900/30' : ''
-                                                        } ${isFuture ? 'opacity-50' : ''}`}
+                                                    className={`transition-colors cursor-pointer ${rowBackground} ${isFuture ? 'opacity-50' : ''}`}
                                                     onClick={() => !isFuture && toggleDay(dateStr)}
                                                 >
                                                     <td className="px-6 py-4">
@@ -607,7 +621,7 @@ export default function CalendarPage() {
                                                         {entry ? (
                                                             <div>
                                                                 <p className="text-white font-medium">
-                                                                    {entry.type === 'work' ? `${entry.hours?.toFixed(1) || 0}h` : getTypeLabel(entry.type)}
+                                                                    {entry.type === 'work' ? formatHoursToTime(entry.hours || 0) : getTypeLabel(entry.type)}
                                                                 </p>
                                                                 {entry.timeSlots && entry.timeSlots.length > 0 && (
                                                                     <p className="text-xs text-slate-400">
@@ -630,7 +644,7 @@ export default function CalendarPage() {
                                                     <td className="px-6 py-4">
                                                         {entry?.breakMinutes !== null && entry?.breakMinutes !== undefined ? (
                                                             <span className={entry.breakMinutes < 0 ? 'text-red-400' : 'text-white'}>
-                                                                {entry.breakMinutes} Min.
+                                                                {formatMinutesToTime(entry.breakMinutes)}
                                                             </span>
                                                         ) : (
                                                             <span className="text-slate-500">—</span>
@@ -639,7 +653,7 @@ export default function CalendarPage() {
                                                     <td className="px-6 py-4">
                                                         {!isWeekend && !isFuture && entry && (
                                                             <span className={`font-medium ${getStatusColor(deficit)}`}>
-                                                                {deficit > 0 ? '+' : ''}{deficit.toFixed(1)}h
+                                                                {deficit > 0 ? '+' : ''}{formatHoursToTime(deficit)}
                                                             </span>
                                                         )}
                                                     </td>
@@ -771,12 +785,12 @@ export default function CalendarPage() {
                                                                         <div className="grid grid-cols-3 gap-4 p-4 bg-slate-900/50 rounded-lg">
                                                                             <div>
                                                                                 <p className="text-xs text-slate-400 mb-1">Arbeitsstunden</p>
-                                                                                <p className="text-lg font-semibold text-white">{calculateTotalHours().toFixed(1)}h</p>
+                                                                                <p className="text-lg font-semibold text-white">{formatHoursToTime(calculateTotalHours())}</p>
                                                                             </div>
                                                                             <div>
                                                                                 <p className="text-xs text-slate-400 mb-1">Pausenzeit</p>
                                                                                 <p className={`text-lg font-semibold ${calculateBreakMinutes() < 0 ? 'text-red-400' : 'text-white'}`}>
-                                                                                    {calculateBreakMinutes()} Min.
+                                                                                    {formatMinutesToTime(calculateBreakMinutes())}
                                                                                 </p>
                                                                             </div>
                                                                             <div>
@@ -839,8 +853,8 @@ export default function CalendarPage() {
                             </tbody>
                         </table>
                     </div>
-                </div>
-            </div>
-        </AppLayout>
+                </div >
+            </div >
+        </AppLayout >
     )
 }
