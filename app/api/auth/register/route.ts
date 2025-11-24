@@ -29,15 +29,24 @@ export async function POST(request: Request) {
         // Hash password
         const hashedPassword = await hash(password, 12)
 
+        // Generate unique employeeId
+        const lastEmployee = await prisma.user.findFirst({
+            orderBy: { employeeId: 'desc' }
+        })
+        const nextNumber = lastEmployee ? parseInt(lastEmployee.employeeId.replace(/\D/g, '')) + 1 : 1
+        const employeeId = `EMP${String(nextNumber).padStart(3, '0')}`
+
         // Create user
         const user = await prisma.user.create({
             data: {
+                employeeId,
                 email,
                 password: hashedPassword,
                 firstName,
                 lastName,
                 role: 'EMPLOYEE', // Default role
                 weeklyHours: 40, // Default 40h/week
+                hourlyRate: 15, // Default hourly rate
                 overtimeBalance: 0,
                 color: `#${Math.floor(Math.random() * 16777215).toString(16)}`, // Random color
             }
