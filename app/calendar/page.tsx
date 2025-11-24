@@ -14,6 +14,7 @@ interface Employee {
     overtimeBalance: number
     vacationDays: number
     vacationDaysUsed: number
+    defaultSchedule?: { startTime: string, endTime: string }[] | null
     color: string
 }
 
@@ -116,7 +117,11 @@ export default function CalendarPage() {
     }
 
     const resetForm = () => {
-        setTimeSlots([{ startTime: '08:00', endTime: '12:00' }])
+        if (selectedEmployee?.defaultSchedule && Array.isArray(selectedEmployee.defaultSchedule) && selectedEmployee.defaultSchedule.length > 0) {
+            setTimeSlots(selectedEmployee.defaultSchedule)
+        } else {
+            setTimeSlots([{ startTime: '08:00', endTime: '16:30' }])
+        }
         setEntryType('work')
         setHalfDay(null)
         setNote('')

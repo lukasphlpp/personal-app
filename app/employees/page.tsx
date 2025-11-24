@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Plus, Search, Mail, Clock, Calendar as CalendarIcon, TrendingUp, TrendingDown, Edit2 } from 'lucide-react'
+import { Plus, Search, Mail, Clock, Calendar as CalendarIcon, TrendingUp, TrendingDown, Edit2, Trash2 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import Modal from '@/components/Modal'
 
@@ -15,6 +15,9 @@ interface Employee {
     role: string
     weeklyHours: number
     overtimeBalance: number
+    vacationDays: number
+    vacationDaysUsed: number
+    defaultSchedule: { startTime: string, endTime: string }[] | null
     color: string
     startDate: string
 }
@@ -34,8 +37,10 @@ export default function EmployeesPage() {
         email: '',
         role: 'EMPLOYEE',
         weeklyHours: 40,
+        vacationDays: 30,
         startDate: new Date().toISOString().split('T')[0]
     })
+    const [defaultSchedule, setDefaultSchedule] = useState<{ startTime: string, endTime: string }[]>([{ startTime: '08:00', endTime: '16:30' }])
     const [submitting, setSubmitting] = useState(false)
 
     useEffect(() => {
@@ -51,8 +56,14 @@ export default function EmployeesPage() {
                 email: editingEmployee.email || '',
                 role: editingEmployee.role,
                 weeklyHours: editingEmployee.weeklyHours,
+                vacationDays: editingEmployee.vacationDays || 30,
                 startDate: new Date(editingEmployee.startDate).toISOString().split('T')[0]
             })
+            if (editingEmployee.defaultSchedule && Array.isArray(editingEmployee.defaultSchedule) && editingEmployee.defaultSchedule.length > 0) {
+                setDefaultSchedule(editingEmployee.defaultSchedule as any)
+            } else {
+                setDefaultSchedule([{ startTime: '08:00', endTime: '16:30' }])
+            }
             setIsModalOpen(true)
         }
     }, [editingEmployee])
@@ -76,8 +87,8 @@ export default function EmployeesPage() {
             const url = '/api/employees'
             const method = editingEmployee ? 'PATCH' : 'POST'
             const body = editingEmployee
-                ? { ...formData, id: editingEmployee.id }
-                : formData
+                ? { ...formData, defaultSchedule, id: editingEmployee.id }
+                : { ...formData, defaultSchedule }
 
             const res = await fetch(url, {
                 method,
@@ -110,8 +121,10 @@ export default function EmployeesPage() {
             email: '',
             role: 'EMPLOYEE',
             weeklyHours: 40,
+            vacationDays: 30,
             startDate: new Date().toISOString().split('T')[0]
         })
+        setDefaultSchedule([{ startTime: '08:00', endTime: '16:30' }])
     }
 
     const handleCloseModal = () => {
@@ -377,14 +390,75 @@ export default function EmployeesPage() {
                         </div>
                     </div>
 
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Urlaubstage/Jahr</label>
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={formData.vacationDays}
+                                onChange={e => setFormData({ ...formData, vacationDays: parseInt(e.target.value) })}
+                                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1.5">Startdatum</label>
+                            <input
+                                type="date"
+                                value={formData.startDate}
+                                onChange={e => setFormData({ ...formData, startDate: e.target.value })}
+                                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Default Schedule */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1.5">Startdatum</label>
-                        <input
-                            type="date"
-                            value={formData.startDate}
-                            onChange={e => setFormData({ ...formData, startDate: e.target.value })}
-                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Standard-Tagesplan</label>
+                        <div className="space-y-2">
+                            {defaultSchedule.map((slot, index) => (
+                                <div key={index} className="flex items-center gap-2">
+                                    <input
+                                        type="time"
+                                        value={slot.startTime}
+                                        onChange={(e) => {
+                                            const newSchedule = [...defaultSchedule]
+                                            newSchedule[index].startTime = e.target.value
+                                            setDefaultSchedule(newSchedule)
+                                        }}
+                                        className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                    />
+                                    <span className="text-slate-400">-</span>
+                                    <input
+                                        type="time"
+                                        value={slot.endTime}
+                                        onChange={(e) => {
+                                            const newSchedule = [...defaultSchedule]
+                                            newSchedule[index].endTime = e.target.value
+                                            setDefaultSchedule(newSchedule)
+                                        }}
+                                        className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                    />
+                                    {defaultSchedule.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setDefaultSchedule(defaultSchedule.filter((_, i) => i !== index))}
+                                            className="p-2 text-red-400 hover:bg-red-500/10 rounded"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                            <button
+                                type="button"
+                                onClick={() => setDefaultSchedule([...defaultSchedule, { startTime: '13:00', endTime: '17:00' }])}
+                                className="text-sm text-primary hover:text-primary/80 flex items-center gap-1"
+                            >
+                                <Plus size={14} /> Zeitraum hinzufügen
+                            </button>
+                        </div>
                     </div>
 
                     <div className="pt-4 flex justify-end gap-3">
