@@ -23,8 +23,7 @@ interface TimeEntry {
     userId: string
     date: string
     type: 'work' | 'vacation' | 'sick' | 'holiday'
-    startTime: string | null
-    endTime: string | null
+    timeSlots: TimeSlot[] | null
     breakMinutes: number | null
     hours: number | null
     note: string | null
@@ -98,8 +97,10 @@ export default function CalendarPage() {
                 // Load existing entry
                 setEntryType(entry.type)
                 setNote(entry.note || '')
-                if (entry.startTime && entry.endTime) {
-                    setTimeSlots([{ startTime: entry.startTime, endTime: entry.endTime }])
+                if (entry.timeSlots && entry.timeSlots.length > 0) {
+                    setTimeSlots(entry.timeSlots)
+                } else {
+                    setTimeSlots([{ startTime: '08:00', endTime: '12:00' }])
                 }
             } else {
                 resetForm()
@@ -115,7 +116,13 @@ export default function CalendarPage() {
     }
 
     const addTimeSlot = () => {
-        setTimeSlots([...timeSlots, { startTime: '13:00', endTime: '17:00' }])
+        const lastSlot = sortedTimeSlots()[sortedTimeSlots().length - 1]
+        const [endH, endM] = lastSlot.endTime.split(':').map(Number)
+        const newStartH = endH + 1
+        const newStart = `${String(newStartH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+        const newEnd = `${String(newStartH + 4).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+
+        setTimeSlots([...timeSlots, { startTime: newStart, endTime: newEnd }])
     }
 
     const removeTimeSlot = (index: number) => {
@@ -128,13 +135,26 @@ export default function CalendarPage() {
         setTimeSlots(updated)
     }
 
+    const sortedTimeSlots = () => {
+        return [...timeSlots].sort((a, b) => a.startTime.localeCompare(b.startTime))
+    }
+
+    const timeToMinutes = (time: string) => {
+        const [h, m] = time.split(':').map(Number)
+        return h * 60 + m
+    }
+
+    const minutesToTime = (minutes: number) => {
+        const h = Math.floor(minutes / 60)
+        const m = minutes % 60
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    }
+
     const calculateTotalHours = () => {
         let totalMinutes = 0
         timeSlots.forEach(slot => {
-            const [startH, startM] = slot.startTime.split(':').map(Number)
-            const [endH, endM] = slot.endTime.split(':').map(Number)
-            const startMinutes = startH * 60 + startM
-            const endMinutes = endH * 60 + endM
+            const startMinutes = timeToMinutes(slot.startTime)
+            const endMinutes = timeToMinutes(slot.endTime)
             totalMinutes += endMinutes - startMinutes
         })
         return totalMinutes / 60
@@ -143,19 +163,31 @@ export default function CalendarPage() {
     const calculateBreakMinutes = () => {
         if (timeSlots.length < 2) return 0
 
-        // Sort slots by start time
-        const sorted = [...timeSlots].sort((a, b) => a.startTime.localeCompare(b.startTime))
+        const sorted = sortedTimeSlots()
         let breakMinutes = 0
 
         for (let i = 0; i < sorted.length - 1; i++) {
-            const [endH, endM] = sorted[i].endTime.split(':').map(Number)
-            const [startH, startM] = sorted[i + 1].startTime.split(':').map(Number)
-            const endMinutes = endH * 60 + endM
-            const startMinutes = startH * 60 + startM
+            const endMinutes = timeToMinutes(sorted[i].endTime)
+            const startMinutes = timeToMinutes(sorted[i + 1].startTime)
             breakMinutes += startMinutes - endMinutes
         }
 
         return breakMinutes
+    }
+
+    const getBreaksBetweenSlots = () => {
+        if (timeSlots.length < 2) return []
+
+        const sorted = sortedTimeSlots()
+        const breaks: { afterIndex: number, minutes: number }[] = []
+
+        for (let i = 0; i < sorted.length - 1; i++) {
+            const endMinutes = timeToMinutes(sorted[i].endTime)
+            const startMinutes = timeToMinutes(sorted[i + 1].startTime)
+            breaks.push({ afterIndex: i, minutes: startMinutes - endMinutes })
+        }
+
+        return breaks
     }
 
     const checkBreakCompliance = (hours: number, breakMinutes: number) => {
@@ -181,20 +213,23 @@ export default function CalendarPage() {
             }
         }
 
+        if (breakMinutes < 0) {
+            alert('Zeiträume überschneiden sich! Bitte korrigieren.')
+            return
+        }
+
         const existingEntry = timeEntries.find(e => new Date(e.date).toDateString() === expandedDay)
 
         try {
             const url = '/api/time-entries'
             const method = existingEntry ? 'PATCH' : 'POST'
 
-            // For work entries, use time slots. For others, just mark the day
             const body = entryType === 'work' ? {
                 ...(existingEntry && { id: existingEntry.id }),
                 userId: selectedEmployee.id,
                 date: new Date(expandedDay).toISOString(),
                 type: entryType,
-                startTime: timeSlots[0].startTime,
-                endTime: timeSlots[timeSlots.length - 1].endTime,
+                timeSlots: sortedTimeSlots(),
                 breakMinutes,
                 hours: totalHours,
                 note
@@ -272,13 +307,12 @@ export default function CalendarPage() {
         const entry = getEntryForDate(date)
         const dailyTarget = selectedEmployee.weeklyHours / 5
 
-        // Skip weekends
         const dayOfWeek = date.getDay()
         if (dayOfWeek === 0 || dayOfWeek === 6) return 0
 
         if (!entry) return -dailyTarget
 
-        if (entry.type !== 'work') return 0 // Vacation/sick/holiday count as target
+        if (entry.type !== 'work') return 0
 
         return (entry.hours || 0) - dailyTarget
     }
@@ -299,7 +333,7 @@ export default function CalendarPage() {
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
 
         if (isWeekend) return ''
-        if (checkDate > today) return '' // Future dates
+        if (checkDate > today) return ''
 
         if (!entry) {
             return '⚠ Eintrag fehlt'
@@ -334,7 +368,6 @@ export default function CalendarPage() {
     return (
         <AppLayout>
             <div className="flex flex-col gap-6">
-                {/* Header */}
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold text-white mb-2">Zeiterfassung</h1>
@@ -342,9 +375,7 @@ export default function CalendarPage() {
                     </div>
                 </div>
 
-                {/* Controls */}
                 <div className="bg-surface border border-slate-700 rounded-xl p-4 flex items-center justify-between gap-4">
-                    {/* Employee Selector */}
                     <div className="flex items-center gap-3">
                         <div
                             className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md"
@@ -369,7 +400,6 @@ export default function CalendarPage() {
                         </select>
                     </div>
 
-                    {/* Month Navigation */}
                     <div className="flex items-center gap-4">
                         <button
                             onClick={previousMonth}
@@ -393,7 +423,6 @@ export default function CalendarPage() {
                     <div className="w-[200px]"></div>
                 </div>
 
-                {/* Time Entry Table */}
                 <div className="bg-surface border border-slate-700 rounded-xl overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
@@ -401,8 +430,8 @@ export default function CalendarPage() {
                                 <tr className="bg-slate-800/50 border-b border-slate-700">
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider w-8"></th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Tag</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Stunden gearbeitet</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Pausen</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Arbeitsstunden</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Pausenzeit</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Überstunden / Defizit</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
                                 </tr>
@@ -454,8 +483,15 @@ export default function CalendarPage() {
                                                                 <p className="text-white font-medium">
                                                                     {entry.type === 'work' ? `${entry.hours?.toFixed(1) || 0}h` : getTypeLabel(entry.type)}
                                                                 </p>
-                                                                {entry.startTime && entry.endTime && (
-                                                                    <p className="text-xs text-slate-400">{entry.startTime} - {entry.endTime}</p>
+                                                                {entry.timeSlots && entry.timeSlots.length > 0 && (
+                                                                    <p className="text-xs text-slate-400">
+                                                                        {entry.timeSlots.map((slot, i) => (
+                                                                            <span key={i}>
+                                                                                {slot.startTime}-{slot.endTime}
+                                                                                {i < entry.timeSlots!.length - 1 && ', '}
+                                                                            </span>
+                                                                        ))}
+                                                                    </p>
                                                                 )}
                                                                 {entry.note && (
                                                                     <p className="text-xs text-slate-400 mt-1">{entry.note}</p>
@@ -466,8 +502,10 @@ export default function CalendarPage() {
                                                         )}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        {entry?.breakMinutes ? (
-                                                            <span className="text-white">{entry.breakMinutes} Min.</span>
+                                                        {entry?.breakMinutes !== null && entry?.breakMinutes !== undefined ? (
+                                                            <span className={entry.breakMinutes < 0 ? 'text-red-400' : 'text-white'}>
+                                                                {entry.breakMinutes} Min.
+                                                            </span>
                                                         ) : (
                                                             <span className="text-slate-500">—</span>
                                                         )}
@@ -486,7 +524,6 @@ export default function CalendarPage() {
                                                     </td>
                                                 </tr>
 
-                                                {/* Expanded Row */}
                                                 {isExpanded && (
                                                     <tr className="bg-slate-800/50">
                                                         <td colSpan={6} className="px-6 py-6">
@@ -528,31 +565,47 @@ export default function CalendarPage() {
                                                                         <div>
                                                                             <label className="block text-sm font-medium text-slate-300 mb-2">Arbeitszeiten</label>
                                                                             <div className="space-y-2">
-                                                                                {timeSlots.map((slot, index) => (
-                                                                                    <div key={index} className="flex items-center gap-3">
-                                                                                        <input
-                                                                                            type="time"
-                                                                                            value={slot.startTime}
-                                                                                            onChange={(e) => updateTimeSlot(index, 'startTime', e.target.value)}
-                                                                                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                                        />
-                                                                                        <span className="text-slate-400">bis</span>
-                                                                                        <input
-                                                                                            type="time"
-                                                                                            value={slot.endTime}
-                                                                                            onChange={(e) => updateTimeSlot(index, 'endTime', e.target.value)}
-                                                                                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                                        />
-                                                                                        {timeSlots.length > 1 && (
-                                                                                            <button
-                                                                                                onClick={() => removeTimeSlot(index)}
-                                                                                                className="p-2 text-red-400 hover:bg-red-500/10 rounded"
-                                                                                            >
-                                                                                                <Trash2 size={16} />
-                                                                                            </button>
-                                                                                        )}
-                                                                                    </div>
-                                                                                ))}
+                                                                                {sortedTimeSlots().map((slot, sortedIndex) => {
+                                                                                    const originalIndex = timeSlots.findIndex(
+                                                                                        s => s.startTime === slot.startTime && s.endTime === slot.endTime
+                                                                                    )
+                                                                                    const breaks = getBreaksBetweenSlots()
+                                                                                    const breakAfter = breaks.find(b => b.afterIndex === sortedIndex)
+
+                                                                                    return (
+                                                                                        <React.Fragment key={sortedIndex}>
+                                                                                            <div className="flex items-center gap-3">
+                                                                                                <input
+                                                                                                    type="time"
+                                                                                                    value={slot.startTime}
+                                                                                                    onChange={(e) => updateTimeSlot(originalIndex, 'startTime', e.target.value)}
+                                                                                                    className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                                />
+                                                                                                <span className="text-slate-400">bis</span>
+                                                                                                <input
+                                                                                                    type="time"
+                                                                                                    value={slot.endTime}
+                                                                                                    onChange={(e) => updateTimeSlot(originalIndex, 'endTime', e.target.value)}
+                                                                                                    className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                                />
+                                                                                                {timeSlots.length > 1 && (
+                                                                                                    <button
+                                                                                                        onClick={() => removeTimeSlot(originalIndex)}
+                                                                                                        className="p-2 text-red-400 hover:bg-red-500/10 rounded"
+                                                                                                    >
+                                                                                                        <Trash2 size={16} />
+                                                                                                    </button>
+                                                                                                )}
+                                                                                            </div>
+
+                                                                                            {breakAfter && (
+                                                                                                <div className={`ml-12 text-sm ${breakAfter.minutes < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                                                                                                    ↓ Pause: {breakAfter.minutes} Min. {breakAfter.minutes < 0 && '(Überschneidung!)'}
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </React.Fragment>
+                                                                                    )
+                                                                                })}
                                                                             </div>
                                                                             <button
                                                                                 onClick={addTimeSlot}
@@ -570,7 +623,9 @@ export default function CalendarPage() {
                                                                             </div>
                                                                             <div>
                                                                                 <p className="text-xs text-slate-400 mb-1">Pausenzeit</p>
-                                                                                <p className="text-lg font-semibold text-white">{calculateBreakMinutes()} Min.</p>
+                                                                                <p className={`text-lg font-semibold ${calculateBreakMinutes() < 0 ? 'text-red-400' : 'text-white'}`}>
+                                                                                    {calculateBreakMinutes()} Min.
+                                                                                </p>
                                                                             </div>
                                                                             <div>
                                                                                 <p className="text-xs text-slate-400 mb-1">Pausenpflicht</p>

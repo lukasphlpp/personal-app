@@ -36,9 +36,8 @@ model TimeEntry {
   userId      String
   date        DateTime
   type        EntryType
-  startTime   String?       // Format: "HH:MM" (z.B. "07:00")
-  endTime     String?       // Format: "HH:MM" (z.B. "11:00")
-  breakMinutes Int?         // Pausenzeit in Minuten
+  timeSlots   Json?         // Array of {startTime: "HH:MM", endTime: "HH:MM"}
+  breakMinutes Int?         // Berechnete Pausenzeit in Minuten
   hours       Float?        // Berechnete Arbeitsstunden
   note        String?
   createdAt   DateTime      @default(now())

@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json()
-        const { userId, date, type, hours, note } = body
+        const { userId, date, type, timeSlots, breakMinutes, hours, note } = body
 
         if (!userId || !date || !type) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -60,6 +60,8 @@ export async function POST(request: Request) {
                 userId,
                 date: new Date(date),
                 type,
+                timeSlots: timeSlots || null,
+                breakMinutes: breakMinutes !== undefined ? breakMinutes : null,
                 hours: hours || null,
                 note: note || null
             }
@@ -84,7 +86,7 @@ export async function PATCH(request: Request) {
         }
 
         const body = await request.json()
-        const { id, type, hours, note } = body
+        const { id, type, timeSlots, breakMinutes, hours, note } = body
 
         if (!id) {
             return NextResponse.json({ error: 'ID required' }, { status: 400 })
@@ -94,6 +96,8 @@ export async function PATCH(request: Request) {
             where: { id },
             data: {
                 ...(type && { type }),
+                ...(timeSlots !== undefined && { timeSlots }),
+                ...(breakMinutes !== undefined && { breakMinutes }),
                 ...(hours !== undefined && { hours }),
                 ...(note !== undefined && { note })
             }
