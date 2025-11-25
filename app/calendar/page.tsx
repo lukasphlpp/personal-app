@@ -16,6 +16,7 @@ interface Employee {
     vacationDaysUsed: number
     defaultSchedule?: { startTime: string, endTime: string }[] | null
     color: string
+    startDate: string  // ← DIESE ZEILE HINZUFÜGEN
 }
 
 interface TimeSlot {
@@ -65,8 +66,13 @@ export default function CalendarPage() {
             const res = await fetch('/api/employees')
             const data = await res.json()
             setEmployees(data)
-            if (data.length > 0) {
+            // Only set first employee if none is selected yet
+            if (data.length > 0 && !selectedEmployee) {
                 setSelectedEmployee(data[0])
+            } else if (selectedEmployee) {
+                // Update the selected employee with fresh data
+                const updated = data.find((e: Employee) => e.id === selectedEmployee.id)
+                if (updated) setSelectedEmployee(updated)
             }
         } catch (error) {
             console.error('Failed to fetch employees', error)
@@ -334,35 +340,34 @@ export default function CalendarPage() {
 
     const calculateDailyDeficit = (date: Date) => {
         if (!selectedEmployee) return 0
-
-        const entries = getEntriesForDate(date)
-        const dailyTarget = selectedEmployee.weeklyHours / 5
-
+    
+        const employeeStartDate = new Date(selectedEmployee.startDate)
+        // If date is before employee start date, no deficit
+        if (date < employeeStartDate) return 0
+    
         const dayOfWeek = date.getDay()
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-            // On weekends, worked hours are pure surplus (unless we have a different logic)
-            // For now, let's just sum up worked hours
-            let weekendWorked = 0
-            entries.forEach(entry => {
-                if (entry.type === 'work') weekendWorked += entry.hours || 0
-                // Vacation/Sick on weekend usually doesn't count, or? Let's assume not.
-            })
-            return weekendWorked
-        }
-
+        const dailyTarget = selectedEmployee.weeklyHours / 5
+    
+        // Weekend = no deficit
+        if (dayOfWeek === 0 || dayOfWeek === 6) return 0
+    
+        const entries = getEntriesForDate(date)
         if (entries.length === 0) return -dailyTarget
-
+    
         let totalWorked = 0
         entries.forEach(entry => {
             if (entry.type === 'work') {
                 totalWorked += entry.hours || 0
-            } else {
-                // Vacation/sick/holiday count as target (or half if halfDay)
+            } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday') {
+                // Full-day absences = 8 hours, half-day = 4 hours
+                const hoursWorked = entry.halfDay ? 4 : 8
+                totalWorked += hoursWorked
+            } else if (entry.type === 'overtime_reduction') {
+                // Overtime reduction uses employee's daily target
                 const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
                 totalWorked += hoursWorked
             }
         })
-
         return totalWorked - dailyTarget
     }
 
@@ -429,18 +434,23 @@ export default function CalendarPage() {
     // Monthly summary calculations
     const calculateMonthlySummary = () => {
         if (!selectedEmployee) return null
-
+    
         const days = getDaysInMonth()
+        const employeeStartDate = new Date(selectedEmployee.startDate)
+        
+        // Filter work days that are after employee start date
         const workDays = days.filter(d => {
             const dow = d.getDay()
-            return dow !== 0 && dow !== 6
+            const isWeekday = dow !== 0 && dow !== 6
+            const isAfterStartDate = d >= employeeStartDate
+            return isWeekday && isAfterStartDate
         })
-
+    
         let totalWorked = 0
         let totalExpected = workDays.length * (selectedEmployee.weeklyHours / 5)
         let totalBreak = 0
         let daysWithEntries = 0
-
+    
         workDays.forEach(day => {
             const entries = getEntriesForDate(day)
             if (entries.length > 0) {
@@ -448,24 +458,29 @@ export default function CalendarPage() {
                 entries.forEach(entry => {
                     if (entry.type === 'work' && entry.hours) {
                         totalWorked += entry.hours
-                        totalBreak += entry.breakMinutes || 0
-                    } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday' || entry.type === 'overtime_reduction') {
-                        const hours = entry.halfDay ? (selectedEmployee.weeklyHours / 5) / 2 : (selectedEmployee.weeklyHours / 5)
-                        totalWorked += hours
+                        totalBreak += (entry.breakMinutes || 0) / 60
+                    } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday') {
+                        // Full-day absences = 8 hours, half-day = 4 hours
+                        const hoursWorked = entry.halfDay ? 4 : 8
+                        totalWorked += hoursWorked
+                    } else if (entry.type === 'overtime_reduction') {
+                        const dailyTarget = selectedEmployee.weeklyHours / 5
+                        const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
+                        totalWorked += hoursWorked
                     }
                 })
             }
         })
-
+    
         const deficit = totalWorked - totalExpected
-
+    
         return {
             totalWorked,
             totalExpected,
             totalBreak,
             deficit,
-            workDays: workDays.length,
             daysWithEntries,
+            totalWorkDays: workDays.length,
             vacationDays: selectedEmployee.vacationDays,
             vacationDaysUsed: selectedEmployee.vacationDaysUsed
         }
