@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Trash2, AlertTriangle, Clock, Calendar as CalendarIcon, TrendingUp } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Trash2, AlertTriangle, Clock, Calendar as CalendarIcon, TrendingUp, Edit2 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import { formatHoursToTime, formatMinutesToTime } from '@/lib/timeUtils'
 
@@ -42,6 +42,7 @@ export default function CalendarPage() {
     const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([])
     const [loading, setLoading] = useState(false)
     const [expandedDay, setExpandedDay] = useState<string | null>(null)
+    const [editingEntryId, setEditingEntryId] = useState<string | null>(null)
 
     // Form state for expanded day
     const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([{ startTime: '08:00', endTime: '12:00' }])
@@ -97,22 +98,24 @@ export default function CalendarPage() {
     const toggleDay = (dateStr: string) => {
         if (expandedDay === dateStr) {
             setExpandedDay(null)
+            setEditingEntryId(null)
             resetForm()
         } else {
-            const entry = timeEntries.find(e => new Date(e.date).toDateString() === dateStr)
-            if (entry) {
-                setEntryType(entry.type)
-                setHalfDay(entry.halfDay)
-                setNote(entry.note || '')
-                if (entry.timeSlots && entry.timeSlots.length > 0) {
-                    setTimeSlots(entry.timeSlots)
-                } else {
-                    setTimeSlots([{ startTime: '08:00', endTime: '12:00' }])
-                }
-            } else {
-                resetForm()
-            }
             setExpandedDay(dateStr)
+            setEditingEntryId(null)
+            resetForm()
+        }
+    }
+
+    const editEntry = (entry: TimeEntry) => {
+        setEditingEntryId(entry.id)
+        setEntryType(entry.type)
+        setHalfDay(entry.halfDay)
+        setNote(entry.note || '')
+        if (entry.timeSlots && entry.timeSlots.length > 0) {
+            setTimeSlots(entry.timeSlots)
+        } else {
+            setTimeSlots([{ startTime: '08:00', endTime: '12:00' }])
         }
     }
 
@@ -239,17 +242,17 @@ export default function CalendarPage() {
             }
         }
 
-        const existingEntry = timeEntries.find(e => new Date(e.date).toDateString() === expandedDay)
+
 
         try {
             const url = '/api/time-entries'
-            const method = existingEntry ? 'PATCH' : 'POST'
+            const method = editingEntryId ? 'PATCH' : 'POST'
 
             const totalHours = entryType === 'work' ? calculateTotalHours() : null
             const breakMinutes = entryType === 'work' ? calculateBreakMinutes() : null
 
             const body = entryType === 'work' ? {
-                ...(existingEntry && { id: existingEntry.id }),
+                ...(editingEntryId && { id: editingEntryId }),
                 userId: selectedEmployee.id,
                 date: new Date(expandedDay).toISOString(),
                 type: entryType,
@@ -259,7 +262,7 @@ export default function CalendarPage() {
                 hours: totalHours,
                 note
             } : {
-                ...(existingEntry && { id: existingEntry.id }),
+                ...(editingEntryId && { id: editingEntryId }),
                 userId: selectedEmployee.id,
                 date: new Date(expandedDay).toISOString(),
                 type: entryType,
@@ -277,7 +280,8 @@ export default function CalendarPage() {
             })
 
             if (res.ok) {
-                setExpandedDay(null)
+                // Keep expanded day open but reset form to allow adding more entries
+                setEditingEntryId(null)
                 fetchTimeEntries()
                 fetchEmployees()
                 resetForm()
@@ -287,24 +291,22 @@ export default function CalendarPage() {
         }
     }
 
-    const deleteEntry = async () => {
-        if (!expandedDay) return
-
-        const entry = timeEntries.find(e => new Date(e.date).toDateString() === expandedDay)
-        if (!entry) return
-
+    const deleteEntry = async (id: string) => {
         if (!confirm('Eintrag wirklich löschen?')) return
 
         try {
-            const res = await fetch(`/api/time-entries?id=${entry.id}`, {
+            const res = await fetch(`/api/time-entries?id=${id}`, {
                 method: 'DELETE'
             })
 
             if (res.ok) {
-                setExpandedDay(null)
                 fetchTimeEntries()
                 fetchEmployees()
-                resetForm()
+                // If we deleted the entry we were editing, reset form
+                if (editingEntryId === id) {
+                    setEditingEntryId(null)
+                    resetForm()
+                }
             }
         } catch (error) {
             console.error('Failed to delete entry', error)
@@ -323,8 +325,8 @@ export default function CalendarPage() {
         return days
     }
 
-    const getEntryForDate = (date: Date) => {
-        return timeEntries.find(entry => {
+    const getEntriesForDate = (date: Date) => {
+        return timeEntries.filter(entry => {
             const entryDate = new Date(entry.date)
             return entryDate.toDateString() === date.toDateString()
         })
@@ -333,21 +335,35 @@ export default function CalendarPage() {
     const calculateDailyDeficit = (date: Date) => {
         if (!selectedEmployee) return 0
 
-        const entry = getEntryForDate(date)
+        const entries = getEntriesForDate(date)
         const dailyTarget = selectedEmployee.weeklyHours / 5
 
         const dayOfWeek = date.getDay()
-        if (dayOfWeek === 0 || dayOfWeek === 6) return 0
-
-        if (!entry) return -dailyTarget
-
-        if (entry.type !== 'work') {
-            // Vacation/sick/holiday count as target (or half if halfDay)
-            const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
-            return hoursWorked - dailyTarget
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            // On weekends, worked hours are pure surplus (unless we have a different logic)
+            // For now, let's just sum up worked hours
+            let weekendWorked = 0
+            entries.forEach(entry => {
+                if (entry.type === 'work') weekendWorked += entry.hours || 0
+                // Vacation/Sick on weekend usually doesn't count, or? Let's assume not.
+            })
+            return weekendWorked
         }
 
-        return (entry.hours || 0) - dailyTarget
+        if (entries.length === 0) return -dailyTarget
+
+        let totalWorked = 0
+        entries.forEach(entry => {
+            if (entry.type === 'work') {
+                totalWorked += entry.hours || 0
+            } else {
+                // Vacation/sick/holiday count as target (or half if halfDay)
+                const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
+                totalWorked += hoursWorked
+            }
+        })
+
+        return totalWorked - dailyTarget
     }
 
     const getStatusColor = (deficit: number) => {
@@ -426,16 +442,18 @@ export default function CalendarPage() {
         let daysWithEntries = 0
 
         workDays.forEach(day => {
-            const entry = getEntryForDate(day)
-            if (entry) {
+            const entries = getEntriesForDate(day)
+            if (entries.length > 0) {
                 daysWithEntries++
-                if (entry.type === 'work' && entry.hours) {
-                    totalWorked += entry.hours
-                    totalBreak += entry.breakMinutes || 0
-                } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday' || entry.type === 'overtime_reduction') {
-                    const hours = entry.halfDay ? (selectedEmployee.weeklyHours / 5) / 2 : (selectedEmployee.weeklyHours / 5)
-                    totalWorked += hours
-                }
+                entries.forEach(entry => {
+                    if (entry.type === 'work' && entry.hours) {
+                        totalWorked += entry.hours
+                        totalBreak += entry.breakMinutes || 0
+                    } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday' || entry.type === 'overtime_reduction') {
+                        const hours = entry.halfDay ? (selectedEmployee.weeklyHours / 5) / 2 : (selectedEmployee.weeklyHours / 5)
+                        totalWorked += hours
+                    }
+                })
             }
         })
 
@@ -582,7 +600,7 @@ export default function CalendarPage() {
                                     </tr>
                                 ) : (
                                     getDaysInMonth().map((date) => {
-                                        const entry = getEntryForDate(date)
+                                        const entries = getEntriesForDate(date)
                                         const deficit = calculateDailyDeficit(date)
                                         const dayOfWeek = date.getDay()
                                         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
@@ -593,13 +611,14 @@ export default function CalendarPage() {
                                         const checkDate = new Date(date)
                                         checkDate.setHours(0, 0, 0, 0)
                                         const isFuture = checkDate > today
-                                        const statusBadges = getStatusBadge(date, entry)
 
-                                        const rowBackground = entry?.type === 'vacation' ? 'bg-blue-500/10 hover:bg-blue-500/20' :
-                                            entry?.type === 'sick' ? 'bg-orange-500/10 hover:bg-orange-500/20' :
-                                                entry?.type === 'holiday' ? 'bg-purple-500/10 hover:bg-purple-500/20' :
-                                                    entry?.type === 'overtime_reduction' ? 'bg-cyan-500/10 hover:bg-cyan-500/20' :
-                                                        isWeekend ? 'bg-slate-900/30 hover:bg-slate-800/30' : 'hover:bg-slate-800/30'
+                                        const statusBadges = entries.flatMap(e => getStatusBadge(date, e) || [])
+
+                                        let rowBackground = isWeekend ? 'bg-slate-900/30 hover:bg-slate-800/30' : 'hover:bg-slate-800/30'
+                                        if (entries.some(e => e.type === 'sick')) rowBackground = 'bg-orange-500/10 hover:bg-orange-500/20'
+                                        else if (entries.some(e => e.type === 'vacation')) rowBackground = 'bg-blue-500/10 hover:bg-blue-500/20'
+                                        else if (entries.some(e => e.type === 'holiday')) rowBackground = 'bg-purple-500/10 hover:bg-purple-500/20'
+                                        else if (entries.some(e => e.type === 'overtime_reduction')) rowBackground = 'bg-cyan-500/10 hover:bg-cyan-500/20'
 
                                         return (
                                             <React.Fragment key={dateStr}>
@@ -623,40 +642,54 @@ export default function CalendarPage() {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        {entry ? (
-                                                            <div>
-                                                                <p className="text-white font-medium">
-                                                                    {entry.type === 'work' ? formatHoursToTime(entry.hours || 0) : getTypeLabel(entry.type)}
-                                                                </p>
-                                                                {entry.timeSlots && entry.timeSlots.length > 0 && (
-                                                                    <p className="text-xs text-slate-400">
-                                                                        {entry.timeSlots.map((slot, i) => (
-                                                                            <span key={i}>
-                                                                                {slot.startTime}-{slot.endTime}
-                                                                                {i < entry.timeSlots!.length - 1 && ', '}
-                                                                            </span>
-                                                                        ))}
-                                                                    </p>
-                                                                )}
-                                                                {entry.note && (
-                                                                    <p className="text-xs text-slate-400 mt-1">{entry.note}</p>
-                                                                )}
+                                                        {entries.length > 0 ? (
+                                                            <div className="space-y-2">
+                                                                {entries.map((entry, idx) => (
+                                                                    <div key={idx}>
+                                                                        <p className="text-white font-medium">
+                                                                            {entry.type === 'work' ? formatHoursToTime(entry.hours || 0) : getTypeLabel(entry.type)}
+                                                                        </p>
+                                                                        {entry.timeSlots && entry.timeSlots.length > 0 && (
+                                                                            <p className="text-xs text-slate-400">
+                                                                                {entry.timeSlots.map((slot, i) => (
+                                                                                    <span key={i}>
+                                                                                        {slot.startTime}-{slot.endTime}
+                                                                                        {i < entry.timeSlots!.length - 1 && ', '}
+                                                                                    </span>
+                                                                                ))}
+                                                                            </p>
+                                                                        )}
+                                                                        {entry.note && (
+                                                                            <p className="text-xs text-slate-400 mt-1">{entry.note}</p>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
                                                             </div>
                                                         ) : (
                                                             <span className="text-slate-500">—</span>
                                                         )}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        {entry?.breakMinutes !== null && entry?.breakMinutes !== undefined ? (
-                                                            <span className={entry.breakMinutes < 0 ? 'text-red-400' : 'text-white'}>
-                                                                {formatMinutesToTime(entry.breakMinutes)}
-                                                            </span>
+                                                        {entries.length > 0 ? (
+                                                            <div className="space-y-2">
+                                                                {entries.map((entry, idx) => (
+                                                                    <div key={idx}>
+                                                                        {entry.breakMinutes !== null && entry.breakMinutes !== undefined ? (
+                                                                            <span className={entry.breakMinutes < 0 ? 'text-red-400' : 'text-white'}>
+                                                                                {formatMinutesToTime(entry.breakMinutes)}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="text-slate-500">—</span>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
                                                         ) : (
                                                             <span className="text-slate-500">—</span>
                                                         )}
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        {!isWeekend && !isFuture && entry && (
+                                                        {!isWeekend && !isFuture && (entries.length > 0 || deficit !== 0) && (
                                                             <span className={`font-medium ${getStatusColor(deficit)}`}>
                                                                 {deficit > 0 ? '+' : ''}{formatHoursToTime(deficit)}
                                                             </span>
@@ -682,170 +715,219 @@ export default function CalendarPage() {
                                                 {isExpanded && (
                                                     <tr className="bg-slate-800/50">
                                                         <td colSpan={6} className="px-6 py-6">
-                                                            <div className="max-w-4xl space-y-4">
+                                                            <div className="max-w-4xl space-y-6">
                                                                 <div className="flex items-center justify-between mb-4">
                                                                     <h3 className="text-lg font-semibold text-white">
-                                                                        Eintrag für {date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                                                        Einträge für {date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}
                                                                     </h3>
-                                                                    {entry && (
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation()
-                                                                                deleteEntry()
-                                                                            }}
-                                                                            className="text-red-400 hover:text-red-300 text-sm flex items-center gap-1"
-                                                                        >
-                                                                            <Trash2 size={14} />
-                                                                            Löschen
-                                                                        </button>
-                                                                    )}
                                                                 </div>
 
-                                                                <div>
-                                                                    <label className="block text-sm font-medium text-slate-300 mb-2">Typ</label>
-                                                                    <select
-                                                                        value={entryType}
-                                                                        onChange={(e) => setEntryType(e.target.value as any)}
-                                                                        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                    >
-                                                                        <option value="work">Arbeit</option>
-                                                                        <option value="vacation">Urlaub</option>
-                                                                        <option value="sick">Krank</option>
-                                                                        <option value="holiday">Feiertag</option>
-                                                                        <option value="overtime_reduction">Überstunden abbau</option>
-                                                                    </select>
-                                                                </div>
-
-                                                                {entryType !== 'work' && (
-                                                                    <div>
-                                                                        <label className="block text-sm font-medium text-slate-300 mb-2">Zeitraum</label>
-                                                                        <select
-                                                                            value={halfDay || 'full'}
-                                                                            onChange={(e) => setHalfDay(e.target.value === 'full' ? null : e.target.value)}
-                                                                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                        >
-                                                                            <option value="full">Ganztags</option>
-                                                                            <option value="morning">Vormittag</option>
-                                                                            <option value="afternoon">Nachmittag</option>
-                                                                        </select>
+                                                                {entries.length > 0 && (
+                                                                    <div className="space-y-3 mb-6">
+                                                                        {entries.map(entry => (
+                                                                            <div key={entry.id} className={`p-4 rounded-lg border flex justify-between items-center ${editingEntryId === entry.id ? 'bg-primary/10 border-primary' : 'bg-slate-900 border-slate-700'
+                                                                                }`}>
+                                                                                <div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="font-medium text-white">{getTypeLabel(entry.type)}</span>
+                                                                                        {getStatusBadge(date, entry)?.map((badge, i) => (
+                                                                                            <span key={i} className={`text-xs px-2 py-0.5 rounded border ${badge.color}`}>
+                                                                                                {badge.text}
+                                                                                            </span>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                    <div className="text-sm text-slate-400 mt-1">
+                                                                                        {entry.type === 'work' && entry.hours && (
+                                                                                            <span>{formatHoursToTime(entry.hours)} • {formatMinutesToTime(entry.breakMinutes || 0)} Pause</span>
+                                                                                        )}
+                                                                                        {entry.timeSlots && entry.timeSlots.length > 0 && (
+                                                                                            <span className="ml-2">
+                                                                                                ({entry.timeSlots.map(s => `${s.startTime}-${s.endTime}`).join(', ')})
+                                                                                            </span>
+                                                                                        )}
+                                                                                        {entry.note && <span className="block mt-1 italic">{entry.note}</span>}
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex gap-2">
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation()
+                                                                                            editEntry(entry)
+                                                                                        }}
+                                                                                        className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                                                                                        title="Bearbeiten"
+                                                                                    >
+                                                                                        <Edit2 size={16} />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation()
+                                                                                            deleteEntry(entry.id)
+                                                                                        }}
+                                                                                        className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+                                                                                        title="Löschen"
+                                                                                    >
+                                                                                        <Trash2 size={16} />
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
                                                                     </div>
                                                                 )}
 
-                                                                {entryType === 'work' && (
-                                                                    <>
-                                                                        <div>
-                                                                            <label className="block text-sm font-medium text-slate-300 mb-2">Arbeitszeiten</label>
-                                                                            <div className="space-y-2">
-                                                                                {sortedTimeSlots().map((slot, sortedIndex) => {
-                                                                                    const originalIndex = timeSlots.findIndex(
-                                                                                        s => s.startTime === slot.startTime && s.endTime === slot.endTime
-                                                                                    )
-                                                                                    const breaks = getBreaksBetweenSlots()
-                                                                                    const breakAfter = breaks.find(b => b.afterIndex === sortedIndex)
-
-                                                                                    return (
-                                                                                        <React.Fragment key={sortedIndex}>
-                                                                                            <div className="flex items-center gap-3">
-                                                                                                <input
-                                                                                                    type="time"
-                                                                                                    value={slot.startTime}
-                                                                                                    onChange={(e) => updateTimeSlot(originalIndex, 'startTime', e.target.value)}
-                                                                                                    className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                                                />
-                                                                                                <span className="text-slate-400">bis</span>
-                                                                                                <input
-                                                                                                    type="time"
-                                                                                                    value={slot.endTime}
-                                                                                                    onChange={(e) => updateTimeSlot(originalIndex, 'endTime', e.target.value)}
-                                                                                                    className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                                                />
-                                                                                                {timeSlots.length > 1 && (
-                                                                                                    <button
-                                                                                                        onClick={() => removeTimeSlot(originalIndex)}
-                                                                                                        className="p-2 text-red-400 hover:bg-red-500/10 rounded"
-                                                                                                    >
-                                                                                                        <Trash2 size={16} />
-                                                                                                    </button>
-                                                                                                )}
-                                                                                            </div>
-
-                                                                                            {breakAfter && (
-                                                                                                <div className={`ml-12 text-sm ${breakAfter.minutes < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-                                                                                                    ↓ Pause: {breakAfter.minutes} Min. {breakAfter.minutes < 0 && '(Überschneidung!)'}
-                                                                                                </div>
-                                                                                            )}
-                                                                                        </React.Fragment>
-                                                                                    )
-                                                                                })}
-                                                                            </div>
+                                                                <div className="bg-slate-900/30 p-6 rounded-lg border border-slate-700">
+                                                                    <div className="flex items-center justify-between mb-4">
+                                                                        <h4 className="text-md font-medium text-slate-300">
+                                                                            {editingEntryId ? 'Eintrag bearbeiten' : 'Neuen Eintrag hinzufügen'}
+                                                                        </h4>
+                                                                        {editingEntryId && (
                                                                             <button
-                                                                                onClick={addTimeSlot}
-                                                                                className="mt-3 flex items-center gap-2 text-primary hover:text-primary/80 text-sm"
+                                                                                onClick={() => {
+                                                                                    setEditingEntryId(null)
+                                                                                    resetForm()
+                                                                                }}
+                                                                                className="text-xs text-slate-400 hover:text-white"
                                                                             >
-                                                                                <Plus size={16} />
-                                                                                Weiteren Zeitraum hinzufügen
+                                                                                Abbrechen
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="space-y-4">
+                                                                        <div>
+                                                                            <label className="block text-sm font-medium text-slate-300 mb-2">Typ</label>
+                                                                            <select
+                                                                                value={entryType}
+                                                                                onChange={(e) => setEntryType(e.target.value as any)}
+                                                                                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                            >
+                                                                                <option value="work">Arbeit</option>
+                                                                                <option value="vacation">Urlaub</option>
+                                                                                <option value="sick">Krank</option>
+                                                                                <option value="holiday">Feiertag</option>
+                                                                                <option value="overtime_reduction">Überstunden abbau</option>
+                                                                            </select>
+                                                                        </div>
+
+                                                                        {entryType !== 'work' && (
+                                                                            <div>
+                                                                                <label className="block text-sm font-medium text-slate-300 mb-2">Zeitraum</label>
+                                                                                <select
+                                                                                    value={halfDay || 'full'}
+                                                                                    onChange={(e) => setHalfDay(e.target.value === 'full' ? null : e.target.value)}
+                                                                                    className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                >
+                                                                                    <option value="full">Ganztags</option>
+                                                                                    <option value="morning">Vormittag</option>
+                                                                                    <option value="afternoon">Nachmittag</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {entryType === 'work' && (
+                                                                            <>
+                                                                                <div>
+                                                                                    <label className="block text-sm font-medium text-slate-300 mb-2">Arbeitszeiten</label>
+                                                                                    <div className="space-y-2">
+                                                                                        {sortedTimeSlots().map((slot, sortedIndex) => {
+                                                                                            const originalIndex = timeSlots.findIndex(
+                                                                                                s => s.startTime === slot.startTime && s.endTime === slot.endTime
+                                                                                            )
+                                                                                            const breaks = getBreaksBetweenSlots()
+                                                                                            const breakAfter = breaks.find(b => b.afterIndex === sortedIndex)
+
+                                                                                            return (
+                                                                                                <React.Fragment key={sortedIndex}>
+                                                                                                    <div className="flex items-center gap-3">
+                                                                                                        <input
+                                                                                                            type="time"
+                                                                                                            value={slot.startTime}
+                                                                                                            onChange={(e) => updateTimeSlot(originalIndex, 'startTime', e.target.value)}
+                                                                                                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                                        />
+                                                                                                        <span className="text-slate-400">bis</span>
+                                                                                                        <input
+                                                                                                            type="time"
+                                                                                                            value={slot.endTime}
+                                                                                                            onChange={(e) => updateTimeSlot(originalIndex, 'endTime', e.target.value)}
+                                                                                                            className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                                        />
+                                                                                                        {timeSlots.length > 1 && (
+                                                                                                            <button
+                                                                                                                onClick={() => removeTimeSlot(originalIndex)}
+                                                                                                                className="p-2 text-red-400 hover:bg-red-500/10 rounded"
+                                                                                                            >
+                                                                                                                <Trash2 size={16} />
+                                                                                                            </button>
+                                                                                                        )}
+                                                                                                    </div>
+
+                                                                                                    {breakAfter && (
+                                                                                                        <div className={`ml-12 text-sm ${breakAfter.minutes < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                                                                                                            ↓ Pause: {breakAfter.minutes} Min. {breakAfter.minutes < 0 && '(Überschneidung!)'}
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </React.Fragment>
+                                                                                            )
+                                                                                        })}
+                                                                                    </div>
+                                                                                    <button
+                                                                                        onClick={addTimeSlot}
+                                                                                        className="mt-3 flex items-center gap-2 text-primary hover:text-primary/80 text-sm"
+                                                                                    >
+                                                                                        <Plus size={16} />
+                                                                                        Weiteren Zeitraum hinzufügen
+                                                                                    </button>
+                                                                                </div>
+
+                                                                                <div className="grid grid-cols-3 gap-4 p-4 bg-slate-900/50 rounded-lg">
+                                                                                    <div>
+                                                                                        <p className="text-xs text-slate-400 mb-1">Arbeitsstunden</p>
+                                                                                        <p className="text-lg font-semibold text-white">{formatHoursToTime(calculateTotalHours())}</p>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <p className="text-xs text-slate-400 mb-1">Pausenzeit</p>
+                                                                                        <p className={`text-lg font-semibold ${calculateBreakMinutes() < 0 ? 'text-red-400' : 'text-white'}`}>
+                                                                                            {formatMinutesToTime(calculateBreakMinutes())}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <p className="text-xs text-slate-400 mb-1">Pausenpflicht</p>
+                                                                                        {(() => {
+                                                                                            const check = checkBreakCompliance(calculateTotalHours(), calculateBreakMinutes())
+                                                                                            return check.compliant ? (
+                                                                                                <p className="text-lg font-semibold text-green-400">✓ Erfüllt</p>
+                                                                                            ) : (
+                                                                                                <div className="flex items-center gap-1">
+                                                                                                    <AlertTriangle size={16} className="text-amber-400" />
+                                                                                                    <p className="text-sm text-amber-400">{check.required} Min. nötig</p>
+                                                                                                </div>
+                                                                                            )
+                                                                                        })()}
+                                                                                    </div>
+                                                                                </div>
+                                                                            </>
+                                                                        )}
+
+                                                                        <div>
+                                                                            <label className="block text-sm font-medium text-slate-300 mb-2">Notiz (optional)</label>
+                                                                            <textarea
+                                                                                value={note}
+                                                                                onChange={(e) => setNote(e.target.value)}
+                                                                                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                                                                                rows={2}
+                                                                            />
+                                                                        </div>
+
+                                                                        <div className="flex justify-end pt-4">
+                                                                            <button
+                                                                                onClick={saveEntry}
+                                                                                className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
+                                                                            >
+                                                                                {editingEntryId ? 'Änderungen speichern' : 'Eintrag speichern'}
                                                                             </button>
                                                                         </div>
-
-                                                                        <div className="grid grid-cols-3 gap-4 p-4 bg-slate-900/50 rounded-lg">
-                                                                            <div>
-                                                                                <p className="text-xs text-slate-400 mb-1">Arbeitsstunden</p>
-                                                                                <p className="text-lg font-semibold text-white">{formatHoursToTime(calculateTotalHours())}</p>
-                                                                            </div>
-                                                                            <div>
-                                                                                <p className="text-xs text-slate-400 mb-1">Pausenzeit</p>
-                                                                                <p className={`text-lg font-semibold ${calculateBreakMinutes() < 0 ? 'text-red-400' : 'text-white'}`}>
-                                                                                    {formatMinutesToTime(calculateBreakMinutes())}
-                                                                                </p>
-                                                                            </div>
-                                                                            <div>
-                                                                                <p className="text-xs text-slate-400 mb-1">Pausenpflicht</p>
-                                                                                {(() => {
-                                                                                    const check = checkBreakCompliance(calculateTotalHours(), calculateBreakMinutes())
-                                                                                    return check.compliant ? (
-                                                                                        <p className="text-lg font-semibold text-green-400">✓ Erfüllt</p>
-                                                                                    ) : (
-                                                                                        <div className="flex items-center gap-1">
-                                                                                            <AlertTriangle size={16} className="text-amber-400" />
-                                                                                            <p className="text-sm text-amber-400">{check.required} Min. nötig</p>
-                                                                                        </div>
-                                                                                    )
-                                                                                })()}
-                                                                            </div>
-                                                                        </div>
-                                                                    </>
-                                                                )}
-
-                                                                <div>
-                                                                    <label className="block text-sm font-medium text-slate-300 mb-2">Notiz (optional)</label>
-                                                                    <textarea
-                                                                        value={note}
-                                                                        onChange={(e) => setNote(e.target.value)}
-                                                                        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                                                                        rows={2}
-                                                                    />
-                                                                </div>
-
-                                                                <div className="flex justify-end gap-3 pt-4">
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation()
-                                                                            setExpandedDay(null)
-                                                                            resetForm()
-                                                                        }}
-                                                                        className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
-                                                                    >
-                                                                        Abbrechen
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation()
-                                                                            saveEntry()
-                                                                        }}
-                                                                        className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-primary/20"
-                                                                    >
-                                                                        Speichern
-                                                                    </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </td>
@@ -857,7 +939,7 @@ export default function CalendarPage() {
                                 )}
                             </tbody>
                         </table>
-                    </div>
+                    </div >
                 </div >
             </div >
         </AppLayout >
