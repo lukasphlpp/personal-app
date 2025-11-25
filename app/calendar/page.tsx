@@ -286,7 +286,8 @@ export default function CalendarPage() {
             })
 
             if (res.ok) {
-                // Keep expanded day open but reset form to allow adding more entries
+                // Close expanded day and reset form
+                setExpandedDay(null)
                 setEditingEntryId(null)
                 fetchTimeEntries()
                 fetchEmployees()
@@ -340,28 +341,32 @@ export default function CalendarPage() {
 
     const calculateDailyDeficit = (date: Date) => {
         if (!selectedEmployee) return 0
-    
+
         const employeeStartDate = new Date(selectedEmployee.startDate)
+        employeeStartDate.setHours(0, 0, 0, 0)
+        const checkDate = new Date(date)
+        checkDate.setHours(0, 0, 0, 0)
         // If date is before employee start date, no deficit
-        if (date < employeeStartDate) return 0
-    
+        if (checkDate < employeeStartDate) return 0
+
         const dayOfWeek = date.getDay()
         const dailyTarget = selectedEmployee.weeklyHours / 5
-    
+
         // Weekend = no deficit
         if (dayOfWeek === 0 || dayOfWeek === 6) return 0
-    
+
         const entries = getEntriesForDate(date)
         if (entries.length === 0) return -dailyTarget
-    
+
         let totalWorked = 0
         entries.forEach(entry => {
             if (entry.type === 'work') {
                 totalWorked += entry.hours || 0
             } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday') {
-                // Full-day absences = 8 hours, half-day = 4 hours
-                const hoursWorked = entry.halfDay ? 4 : 8
-                totalWorked += hoursWorked
+                // Only full-day absences = 8 hours, half-day needs manual entry
+                if (!entry.halfDay) {
+                    totalWorked += 8
+                }
             } else if (entry.type === 'overtime_reduction') {
                 // Overtime reduction uses employee's daily target
                 const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
@@ -434,23 +439,26 @@ export default function CalendarPage() {
     // Monthly summary calculations
     const calculateMonthlySummary = () => {
         if (!selectedEmployee) return null
-    
+
         const days = getDaysInMonth()
         const employeeStartDate = new Date(selectedEmployee.startDate)
-        
+        employeeStartDate.setHours(0, 0, 0, 0)
+
         // Filter work days that are after employee start date
         const workDays = days.filter(d => {
             const dow = d.getDay()
             const isWeekday = dow !== 0 && dow !== 6
-            const isAfterStartDate = d >= employeeStartDate
+            const checkDate = new Date(d)
+            checkDate.setHours(0, 0, 0, 0)
+            const isAfterStartDate = checkDate >= employeeStartDate
             return isWeekday && isAfterStartDate
         })
-    
+
         let totalWorked = 0
         let totalExpected = workDays.length * (selectedEmployee.weeklyHours / 5)
         let totalBreak = 0
         let daysWithEntries = 0
-    
+
         workDays.forEach(day => {
             const entries = getEntriesForDate(day)
             if (entries.length > 0) {
@@ -460,9 +468,10 @@ export default function CalendarPage() {
                         totalWorked += entry.hours
                         totalBreak += (entry.breakMinutes || 0) / 60
                     } else if (entry.type === 'vacation' || entry.type === 'sick' || entry.type === 'holiday') {
-                        // Full-day absences = 8 hours, half-day = 4 hours
-                        const hoursWorked = entry.halfDay ? 4 : 8
-                        totalWorked += hoursWorked
+                        // Only full-day absences = 8 hours, half-day needs manual entry
+                        if (!entry.halfDay) {
+                            totalWorked += 8
+                        }
                     } else if (entry.type === 'overtime_reduction') {
                         const dailyTarget = selectedEmployee.weeklyHours / 5
                         const hoursWorked = entry.halfDay ? dailyTarget / 2 : dailyTarget
@@ -471,9 +480,9 @@ export default function CalendarPage() {
                 })
             }
         })
-    
+
         const deficit = totalWorked - totalExpected
-    
+
         return {
             totalWorked,
             totalExpected,
